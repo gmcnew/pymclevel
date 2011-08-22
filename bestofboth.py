@@ -403,7 +403,7 @@ def erosionBoundaries(direction, distance):
     elif direction == Erode.R:
         return (16 - distance, 16, 0, 16)
 
-def erode(chunk, direction):
+def erode(chunk, direction, width):
     #print("eroding chunk %d,%d in direction %d" % (chunk[0], chunk[1], direction))
 
     (minX, maxX, minZ, maxZ) = erosionBoundaries(direction, width)
