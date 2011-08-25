@@ -27,6 +27,211 @@ NUM_WORKERS = 2
 import signal
 import sys
 
+class ErosionTask:
+    @staticmethod
+    def fromString(string):
+        (erosionType, direction, posX, posZ) = re.split("\s+", string)
+        if erosionType == "corner":
+            return CornerErosionTask(Erode.Map.index(direction), int(posX), int(posZ))
+        elif erosionType == "edge":
+            return EdgeErosionTask(Erode.Map.index(direction), int(posX), int(posZ))
+        else:
+            raise Exception("unrecognized erosion type '%s'" % (erosionType))
+        #    (chunkX, chunkZ, erodeType, xPos, zPos, xMin, xMax, zMin, zMax) = [int(x) for x in re.split("\s+", line)]
+        #      if type
+        
+    def __init__(self, posX, posZ):
+        self.posX = posX
+        self.posZ = posZ
+    
+    def run(self, level, erosionWidth = 8, waterWidth = 2, maxPreservedHeight = 90):
+        raise Exception("not implemented")
+    
+    def erode(self, chunk, x, z, h):
+        #print("setting (%d,%d) to h=%d" % (x, z, h))
+        
+        if h == MAX_HEIGHT:
+            return
+        
+        # The height at which air will begin.
+        ah = h
+        
+        # If a tree is standing on terrain that will be preserved,
+        # preserve the tree, too.
+        while chunk.Blocks[x, z, ah] in logIDs:
+            ah += 1
+        
+        # Turn everything in this vertical column into air, but
+        # leave leaves alone (to avoid weird-looking half-trees).
+        for h2 in range(ah, 128):
+            if chunk.Blocks[x, z, h2] not in leafIDs:
+                chunk.Blocks[x, z, h2] = airID
+        if h <= WATER_HEIGHT + 1:
+            if h <= WATER_HEIGHT:
+                chunk.Blocks[x, z, h : WATER_HEIGHT + 1] = waterID
+            # Turn non-water, non-ice blocks along the shoreline, or under the water, into sand.
+            if chunk.Blocks[x, z, h - 1] != waterID \
+                    and chunk.Blocks[x, z, h - 1] != iceID:
+                chunk.Blocks[x, z, h - 1] = sandID
+        
+class CornerErosionTask(ErosionTask):
+    def __init__(self, cornerDirection, cornerPosX, cornerPosZ):
+        ErosionTask.__init__(self, cornerPosX, cornerPosZ)
+        self.cornerDirection = cornerDirection
+        
+    def __repr__(self):
+        return "corner %-2s %d %d" % (Erode.Map[self.cornerDirection], self.posX, self.posZ)
+        
+    def run(self, level, erosionWidth = 8, waterWidth = 3, maxPreservedHeight = 75):
+        chunksToEdit = {}
+        
+        # First, make sure all the chunks we need are present.
+        try:
+            for cx in range(-1, 1):
+                for cz in range(-1, 1):
+                    chunk = level.getChunk(self.posX / 16 + cx, self.posZ / 16 + cz)
+                    chunksToEdit[(cx, cz)] = chunk
+        except ChunkNotPresent:
+            return False
+            
+        if self.cornerDirection == Erode.TL:
+            highPoint = (8, 8)
+        elif self.cornerDirection == Erode.TR:
+            highPoint = (-8, 8)
+        elif self.cornerDirection == Erode.BR:
+            highPoint = (-8, -8)
+        elif self.cornerDirection == Erode.BL:
+            highPoint = (8, -8)
+            
+        for cx in range(-1, 1):
+            for cz in range(-1, 1):
+                chunkChanged = False
+                chunk = chunksToEdit[(cx, cz)]
+                highPointX = highPoint[0] - (cx * 16)
+                highPointZ = highPoint[1] - (cz * 16)
+                print("trying to change CORNER chunk %d,%d.. hp %d,%d" % (self.posX + cx, self.posZ + cz, highPointX, highPointZ))
+                for x in range(-8 * cx, -8 * (cx - 1)):
+                    for z in range(-8 * cz, -8 * (cz - 1)):
+                        dx = x - highPointX
+                        dz = z - highPointZ
+                        
+                        distanceFromCenter = math.sqrt(dx * dx + dz * dz)
+                        distanceFromEdge = 8 - distanceFromCenter
+        
+                        if distanceFromEdge < 0:
+                            distanceFromEdge *= -1
+                        
+                        # We're far enough from the edge that no erosion should occur.
+                        if distanceFromEdge > erosionWidth:
+                            continue
+                        
+                        distanceFromRiver = distanceFromEdge - waterWidth
+                        if distanceFromRiver < 0:
+                            distanceFromRiver = 0
+                        
+                        # (distanceFromEdge / halfErosionWidth) is on the interval [0..1],
+                        # so h will be on the interval [2^0..2^1], or [1..2].
+                        h = 2 ** (float(distanceFromRiver) / float(erosionWidth - waterWidth))
+                        
+                        #if direction == Erode.T and z == 1:
+                            #print(h)
+                        
+                        # Shift h to the interval [0..1].
+                        h -= 1
+                        #if direction == Erode.T and z == 1:
+                            #print(h)
+                        
+                        h *= maxPreservedHeight - WATER_HEIGHT
+                        #if direction == Erode.T and z == 1:
+                            #print(h)
+                        
+                        h += WATER_HEIGHT
+                        
+                        self.erode(chunk, x, z, int(h))
+                        chunkChanged = True
+                print("changed a corner chunk (%s %d,%d)" % (Erode.Map[self.cornerDirection], self.posX + cx, self.posZ + cz))
+                if chunkChanged:
+                    chunk.chunkChanged()
+        return True
+        
+class EdgeErosionTask(ErosionTask):
+    def __init__(self, edgeDirection, edgePosX, edgePosZ):
+        ErosionTask.__init__(self, edgePosX, edgePosZ)
+        self.edgeDirection = edgeDirection
+        
+    def __repr__(self):
+        return "edge   %-2s %d %d" % (Erode.Map[self.edgeDirection], self.posX, self.posZ)
+        
+    def run(self, level, erosionWidth = 8, waterWidth = 3, maxPreservedHeight = 75):
+        chunksToEdit = {}
+        
+        # First, make sure all the chunks we need are present.
+        try:
+            for cx in range(-1, 1):
+                for cz in range(-1, 1):
+                    chunk = level.getChunk(self.posX / 16 + cx, self.posZ / 16 + cz)
+                    chunksToEdit[(cx, cz)] = chunk
+        except ChunkNotPresent:
+            return False
+        
+        for cx in range(-1, 1):
+            for cz in range(-1, 1):
+                chunkChanged = False
+                xMin = -8 * cx
+                xMax = -8 * (cx - 1)
+                zMin = -8 * cz
+                zMax = -8 * (cz - 1)
+                print("trying to change chunk %d,%d from x=%d..%d, z=%d..%d" % (self.posX + cx, self.posZ + cz, xMin, xMax, zMin, zMax))
+                chunk = chunksToEdit[(cx, cz)]
+                for x in range(xMin, xMax):
+                    for z in range(zMin, zMax):
+                        if self.edgeDirection in [Erode.T, Erode.B]:
+                            distanceFromCenter = abs(8 - z)
+                        elif self.edgeDirection in [Erode.L, Erode.R]:
+                            distanceFromCenter = abs(8 - x)
+                        else:
+                            raise Exception("unrecognized edge direction %d (%s)" % (self.edgeDirection, Erode.Map[self.edgeDirection]))
+                            
+                        distanceFromEdge = 8 - distanceFromCenter
+        
+                        if distanceFromEdge < 0:
+                            distanceFromEdge *= -1
+                        
+                        # We're far enough from the edge that no erosion should occur.
+                        if distanceFromEdge > erosionWidth:
+                            continue
+                        
+                        distanceFromRiver = distanceFromEdge - waterWidth
+                        if distanceFromRiver < 0:
+                            distanceFromRiver = 0
+                        
+                        distanceFromRiver = distanceFromEdge - waterWidth
+                        
+                        # (distanceFromEdge / halfErosionWidth) is on the interval [0..1],
+                        # so h will be on the interval [2^0..2^1], or [1..2].
+                        h = 2 ** (float(distanceFromRiver) / float(erosionWidth - waterWidth))
+                        
+                        #if direction == Erode.T and z == 1:
+                            #print(h)
+                        
+                        # Shift h to the interval [0..1].
+                        h -= 1
+                        #if direction == Erode.T and z == 1:
+                            #print(h)
+                        
+                        h *= maxPreservedHeight - WATER_HEIGHT
+                        #if direction == Erode.T and z == 1:
+                            #print(h)
+                        
+                        h += WATER_HEIGHT
+                        
+                        self.erode(chunk, x, z, int(h))
+                        chunkChanged = True
+                if chunkChanged:
+                    print("changed an edge chunk (%s %d,%d)" % (Erode.Map[self.edgeDirection], self.posX, self.posZ))
+                    chunk.chunkChanged()
+        return True
+
 
 # These values indicate the shape a chunk should have after erosion.
 # T, B, L and R mean "top", "bottom", "left" and "right", respectively.
@@ -45,6 +250,9 @@ import sys
 class Erode:
     Map = [ "TL", "T", "TR", "L", "R", "BL", "B", "BR",
             "NTL", "NTR", "NBL", "NBR" ]
+    Corner = 90
+    Edge = 91
+    
     TL  = 0
     T   = 1
     TR  = 2
@@ -53,10 +261,6 @@ class Erode:
     BL  = 5 # toward the bottom-left 
     B   = 6
     BR  = 7
-    NTL = 8
-    NTR = 9
-    NBL = 10
-    NBR = 11
 
 TL = 0
 T  = 1
@@ -84,37 +288,6 @@ leafIDs = [
     materials.materials.BirchLeaves.ID,
     ]
 
-
-# An Eroder takes (chunk, direction) pairs from a queue (erodeQueue),
-# erodes them, and returns them to a different queue (progressQueue).
-# However, map smoothing is IO-bound, not CPU-bound, so multithreading
-# this probably isn't worth the complication.
-class Eroder(threading.Thread):
-    
-    def __init__(self, ID, level, erodeQueue, progressQueue):
-        threading.Thread.__init__(self)
-        self.ID = ID
-        self.level = level
-        self.erodeQueue = erodeQueue
-        self.progressQueue = progressQueue
-        
-    def run(self):
-        while True:
-            # Wait forever for a new task. Null tasks (where chunk is
-            # None) will be at the end of the queue to signal the end of
-            # work.
-            (coords, direction) = self.erodeQueue.get(True)
-            if coords is None:
-                print("worker %d is returning" % self.ID)
-                break
-            if random.random() > 0.999:
-                try:
-                    chunk = self.level.getChunk(coords[0], coords[1])
-                    erode(chunk, direction)
-                except ChunkNotPresent as cnp:
-                    pass
-            self.progressQueue.put(coords)
-
 def find_edges(worldDir, edgeFilename):
     level = mclevel.fromFile(worldDir)
     edgeFile = open(edgeFilename, "w")
@@ -126,24 +299,24 @@ def find_edges(worldDir, edgeFilename):
     for chunk in level.allChunks:
         checkChunk(level, chunk, erodeQ)
     
-    edgeFile.write("# chunkCoordX chunkCoordY erosionType\n")
+    edgeFile.write("# erodeType erodeDirection posX posZ")
     
     numEdgeChunks = 0
     while not erodeQ.empty():
-        (coords, direction) = erodeQ.get(True)
-        edgeFile.write("%d %d %s\n" % (coords[0], coords[1], Erode.Map[direction]))
+        task = erodeQ.get(True)
+        edgeFile.write("%s\n" % (task))
         numEdgeChunks += 1
     edgeFile.close()
-    print("found %d edge chunk(s)" % (numEdgeChunks))
+    print("found %d perimeter features" % (numEdgeChunks))
 
 def smooth(worldDir, width, edgeFilename):
     level = mclevel.fromFile(worldDir)
-    edgeFile = open(edgeFilename, "r")
     newEdgeFile = open(edgeFilename + ".tmp", "w")
+    edgeFile = open(edgeFilename, "r")
     
     width = int(width) / 2
     
-    toErode = []
+    erosionTasks = []
     
     numChunks = 0
     for line in edgeFile.readlines():
@@ -153,51 +326,68 @@ def smooth(worldDir, width, edgeFilename):
         if line.startswith("#"):
             newEdgeFile.write(originalLine)
         else:
-            (chunkX, chunkZ, directionString) = re.split("\s+", line)
-            (chunkX, chunkZ) = (int(chunkX), int(chunkZ))
-            direction = Erode.Map.index(directionString)
+            task = ErosionTask.fromString(line)
             numChunks += 1
-            if direction < 0:
-                raise Exception("unrecognized direction '%s' in edge file" % (directionString))
-            try:
-                chunk = level.getChunk(chunkX, chunkZ)
-                toErode.append((chunk, direction))
-            except ChunkNotPresent as cnp:
-                newEdgeFile.write("%d %d %s\n" % (chunkX, chunkZ, directionString))
+            erosionTasks.append(task)
     
-    newEdgeFile.close()
     edgeFile.close()
     
-    numEroded = len(toErode)
+    numEroded = len(erosionTasks)
     
-    if toErode:
-        print("smoothing %d chunk(s)..." % (numEroded))
+    if erosionTasks:
+        print("smoothing %d perimeter feature(s)..." % (numEroded))
         
         i = 0
         lastReportedProgress = 0
-        for (chunk, direction) in toErode:
+        for erosionTask in erosionTasks:
             i += 1
             progress = i * 100 / numEroded
             if progress >= lastReportedProgress + 10:
                 lastReportedProgress = progress
                 print("%d%%" % (progress))
-            erode(chunk, direction, width)
-            chunk.chunkChanged()
+            
+            # If the task didn't run (because it requires chunks that
+            # haven't been generated yet), write it back to edges.txt.
+            if not erosionTask.run(level, width):
+                newEdgeFile.write("%s\n" % (task))
+            
         
         level.saveInPlace()
-        print("smoothed %d chunk(s)" % (numEroded))
+        print("smoothed %d perimeter feature(s)" % (numEroded))
+    
+    newEdgeFile.close()
     
     if numChunks - numEroded:
-        print("%d chunk(s) were not smoothed (since they haven't been explored)" % (numChunks - numEroded))
+        print("%d perimeter feature(s) were not smoothed (since they haven't been explored completely)" % (numChunks - numEroded))
     elif not numChunks:
         print("the map is perfectly smoothed -- nothing to do!")
     
     shutil.move(newEdgeFile.name, edgeFilename)
 
+def addCorner(chunkPos, erodeList, erodeType):
+    (chunkX, chunkZ) = chunkPos
+    erodeList.append(
+        CornerErosionTask(
+            erodeType,
+            chunkX * 16,
+            chunkZ * 16
+        )
+    )
+
+def addEdge(chunkPos, erodeList, erodeType):
+    (chunkX, chunkZ) = chunkPos
+    erodeList.append(
+        EdgeErosionTask(
+            erodeType,
+            chunkX * 16,
+            chunkZ * 16
+        )
+    )
+
 # Examine a chunk in a level. For each edge that's found, add a
 # (chunk, direction) pair to erodeQueue. Return the number of pairs
 # added to the queue.
-def checkChunk(level, chunk, erodeQueue):
+def checkChunk(level, coords, erodeQueue):
     
     tasksAdded = 0
     
@@ -211,7 +401,7 @@ def checkChunk(level, chunk, erodeQueue):
     
     for i in range(len(aroundMe)):
         a = aroundMe[i]
-        if (chunk[0] + a[0], chunk[1] + a[1]) not in level.allChunks:
+        if (coords[0] + a[0], coords[1] + a[1]) not in level.allChunks:
             onPerimeter = True
             neighbors[i] = False
     
@@ -221,62 +411,60 @@ def checkChunk(level, chunk, erodeQueue):
     
         # Top-left corner
         if not (neighbors[TL] or neighbors[T] or neighbors[L]):
-            toErode.append((chunk, Erode.TL))
-            toErode.append(((chunk[0] - 1, chunk[1] - 1), Erode.NBR))
+            addCorner(coords, toErode, Erode.TL)
         
         # Top-right corner
         if not (neighbors[T] or neighbors[TR] or neighbors[R]):
-            toErode.append((chunk, Erode.TR))
-            toErode.append(((chunk[0] + 1, chunk[1] - 1), Erode.NBL))
+            coordsRight = (coords[0] + 1, coords[1])
+            addCorner(coordsRight, toErode, Erode.TR)
         
         # Bottom-right corner
         if not (neighbors[R] or neighbors[BR] or neighbors[B]):
-            toErode.append((chunk, Erode.BR))
-            toErode.append(((chunk[0] + 1, chunk[1] + 1), Erode.NTL))
+            coordsBelowAndRight = (coords[0] + 1, coords[1] + 1)
+            addCorner(coordsBelowAndRight, toErode, Erode.BR)
         
         # Bottom-left corner
         if not (neighbors[B] or neighbors[BL] or neighbors[L]):
-            toErode.append((chunk, Erode.BL))
-            toErode.append(((chunk[0] - 1, chunk[1] + 1), Erode.NTR))
-            
-        if not neighbors[T]:
-            toErode.append((chunk, Erode.T))
-            toErode.append(((chunk[0], chunk[1] - 1), Erode.B))
-            
-        if not neighbors[B]:
-            toErode.append((chunk, Erode.B))
-            toErode.append(((chunk[0], chunk[1] + 1), Erode.T))
-        
-        if not neighbors[L]:
-            toErode.append((chunk, Erode.L))
-            toErode.append(((chunk[0] - 1, chunk[1]), Erode.R))
-        
-        if not neighbors[R]:
-            toErode.append((chunk, Erode.R))
-            toErode.append(((chunk[0] + 1, chunk[1]), Erode.L))
-        
+            coordsBelow = (coords[0], coords[1] + 1)
+            addCorner(coordsBelow, toErode, Erode.BL)
+    
         # Top-left corner (inverted)
-        if neighbors[T] and neighbors[L] and not neighbors[TL]:
-            toErode.append((chunk, Erode.NTL))
-            toErode.append(((chunk[0] - 1, chunk[1] - 1), Erode.BR))
+        if neighbors[L] and neighbors[T] and not neighbors[TL]:
+            addCorner(coords, toErode, Erode.BR)
         
         # Top-right corner (inverted)
         if neighbors[T] and neighbors[R] and not neighbors[TR]:
-            toErode.append((chunk, Erode.NTR))
-            toErode.append(((chunk[0] + 1, chunk[1] - 1), Erode.BL))
+            coordsRight = (coords[0] + 1, coords[1])
+            addCorner(coordsRight, toErode, Erode.BL)
         
         # Bottom-right corner (inverted)
-        if neighbors[B] and neighbors[R] and not neighbors[BR]:
-            toErode.append((chunk, Erode.NBR))
-            toErode.append(((chunk[0] + 1, chunk[1] + 1), Erode.TL))
+        if neighbors[R] and neighbors[B] and not neighbors[BR]:
+            coordsBelowAndRight = (coords[0] + 1, coords[1] + 1)
+            addCorner(coordsBelowAndRight, toErode, Erode.TL)
         
         # Bottom-left corner (inverted)
         if neighbors[B] and neighbors[L] and not neighbors[BL]:
-            toErode.append((chunk, Erode.NBL))
-            toErode.append(((chunk[0] - 1, chunk[1] + 1), Erode.TR))
-    
-    for (chunkCoords, direction) in toErode:
-        erodeQueue.put((chunkCoords, direction))
+            coordsBelow = (coords[0], coords[1] + 1)
+            addCorner(coordsBelow, toErode, Erode.TR)
+        
+        if neighbors[L]:
+            if not (neighbors[T] or neighbors[TL]):
+                addEdge(coords, toErode, Erode.T)
+            
+            if not (neighbors[B] or neighbors[BL]):
+                coordsBelow = (coords[0], coords[1] + 1)
+                addEdge(coordsBelow, toErode, Erode.T)
+        
+        if neighbors[T]:
+            if not (neighbors[L] or neighbors[TL]):
+                addEdge(coords, toErode, Erode.L)
+        
+            if not (neighbors[R] or neighbors[TR]):
+                coordsRight = (coords[0] + 1, coords[1])
+                addEdge(coordsRight, toErode, Erode.L)
+        
+    for task in toErode:
+        erodeQueue.put(task)
         tasksAdded += 1
     
     return tasksAdded
@@ -288,7 +476,48 @@ def checkChunk(level, chunk, erodeQueue):
 # maxPreservedHeight: Within the erosion area, everything above this
 #   height will be eroded away, even on the edges of the erosion area.
 #   There will be a slope between the edges and the river.
-def erosionHeight(x, z, direction, erosionWidth = 8, riverWidth = 1, maxPreservedHeight = 90):
+
+def erosionHeight(x, z, erodeType, xCenter, zCenter, erosionWidth = 8, riverWidth = 4, maxPreservedHeight = 90):
+    
+    h = MAX_HEIGHT
+    if erodeType == Erode.Corner:
+        dx = xCenter - x - 0.5
+        dz = zCenter - z - 0.5
+        distanceFromCenter = math.sqrt(dx * dx + dz * dz)
+        distanceFromEdge = 8 - distanceFromCenter
+        
+        if distanceFromEdge < 0:
+            distanceFromEdge *= -1
+        
+        # We're far enough from the edge that no erosion should occur.
+        if distanceFromEdge > erosionWidth:
+            return MAX_HEIGHT
+        
+        distanceFromRiver = distanceFromEdge - riverWidth
+        if distanceFromRiver < 0:
+            distanceFromRiver = 0
+        
+        # (distanceFromEdge / halfErosionWidth) is on the interval [0..1],
+        # so h will be on the interval [2^0..2^1], or [1..2].
+        h = 2 ** (float(distanceFromRiver) / float(erosionWidth - riverWidth))
+        
+        #if direction == Erode.T and z == 1:
+            #print(h)
+        
+        # Shift h to the interval [0..1].
+        h -= 1
+        #if direction == Erode.T and z == 1:
+            #print(h)
+        
+        h *= maxPreservedHeight - WATER_HEIGHT
+        #if direction == Erode.T and z == 1:
+            #print(h)
+        
+        h += WATER_HEIGHT
+    
+    return int(h)
+            
+def erosionHeightOld(x, z, direction, erosionWidth = 8, riverWidth = 1, maxPreservedHeight = 90):
     
     # Corners are eroded based on the location of a high point -or- a
     # low point.
@@ -403,7 +632,39 @@ def erosionBoundaries(direction, distance):
     elif direction == Erode.R:
         return (16 - distance, 16, 0, 16)
 
-def erode(chunk, direction, width):
+def erode(chunk, erodeType, xCenter, zCenter, xMin, xMax, zMin, zMax, width):
+    #print("eroding x=%d..%d, z=%d..%d" % (xMin, xMax, zMin, zMax))
+    for x in range(xMin, xMax):
+        for z in range(zMin, zMax):
+            h = erosionHeight(x, z, erodeType, xCenter, zCenter, width)
+            
+            #if (xCenter == 8 and zCenter == 8):
+            #    print("eroding w%d, %d,%d... h=%d" % (width, x, z, h))
+            if h == MAX_HEIGHT:
+                continue
+            
+            # The height at which air will begin.
+            ah = h
+            
+            # If a tree is standing on terrain that will be preserved,
+            # preserve the tree, too.
+            while chunk.Blocks[x, z, ah] in logIDs:
+                ah += 1
+            
+            # Turn everything in this vertical column into air, but
+            # leave leaves alone (to avoid weird-looking half-trees).
+            for h2 in range(ah, 128):
+                if chunk.Blocks[x, z, h2] not in leafIDs:
+                    chunk.Blocks[x, z, h2] = airID
+            if h <= WATER_HEIGHT + 1:
+                if h <= WATER_HEIGHT:
+                    chunk.Blocks[x, z, h : WATER_HEIGHT + 1] = waterID
+                # Turn non-water, non-ice blocks along the shoreline, or under the water, into sand.
+                if chunk.Blocks[x, z, h - 1] != waterID \
+                        and chunk.Blocks[x, z, h - 1] != iceID:
+                    chunk.Blocks[x, z, h - 1] = sandID
+
+def erode_old(chunk, direction, width):
     #print("eroding chunk %d,%d in direction %d" % (chunk[0], chunk[1], direction))
 
     (minX, maxX, minZ, maxZ) = erosionBoundaries(direction, width)
@@ -447,13 +708,13 @@ bestofboth --smooth <path_to_world> --edge-file <edge_file> [--width <1-16>]
                     help="world to examine")
     parser.add_option("--smooth", dest="smooth", 
                     help="world to smooth")
-    parser.add_option("--edge-file", dest="edge_file", 
-                    help="edge file to use")
     parser.add_option("--width", dest="width", 
                     default = "16",
                     help="width of the river")
 
     (options, args) = parser.parse_args()
+    
+    worldDir = options.find_edges or options.smooth
     
     if options.find_edges and options.smooth:
         parser.error("--find-edges and --smooth can't be specified " \
@@ -462,101 +723,24 @@ bestofboth --smooth <path_to_world> --edge-file <edge_file> [--width <1-16>]
             "--smooth.")
     elif not (options.find_edges or options.smooth):
         parser.error("Must specify --find-edges or --smooth.")
-    elif not options.edge_file:
-        parser.error("Must specify --edge-file.")
-    elif options.find_edges and not os.path.exists(os.path.join(options.find_edges, "level.dat")):
-        parser.error("'%s' is not a Minecraft world directory (no " \
-            "level.dat file was found)." % (options.find_edges))
-    elif options.smooth and not os.path.exists(options.edge_file):
-        parser.error("Edge file '%s' does not exist, but the edge " \
-            "file must exist when --smooth is specified." \
-            % (options.edge_file))
+    elif not os.path.exists(os.path.join(worldDir, "level.dat")):
+            parser.error("'%s' is not a Minecraft world directory (no " \
+                "level.dat file was found)." % (options.worldDir))
+    elif options.smooth and not os.path.exists(os.path.join(options.smooth, "edges.txt")):
+        parser.error("Edge file '%s' does not exist. Run with " \
+            "--find-edges first. The edge file must exist when " \
+            "--smooth is specified." \
+            % (os.path.join(options.smooth, "edges.txt")))
     elif options.width and (int(options.width) < 1 or int(options.width) > 16):
         parser.error("--width must be between 1 and 16 (inclusive)")
-        
+    
+    edgeFilePath = os.path.join(worldDir, "edges.txt")
     
     # Phew! Now that the arguments have been validated...
     if options.find_edges:
-        find_edges(options.find_edges, options.edge_file)
+        find_edges(options.find_edges, edgeFilePath)
     elif options.smooth:
-        smooth(options.smooth, options.width, options.edge_file)
-    
-    return
-
-
-    if os.path.exists(sys.argv[3]):
-        shutil.rmtree(sys.argv[3])
-    shutil.copytree(sys.argv[1], sys.argv[3])
-
-    level1 = mclevel.fromFile(sys.argv[3])
-    level2 = mclevel.fromFile(sys.argv[2])
-
-    level1bounds = level1.getWorldBounds()
-    level2bounds = level2.getWorldBounds()
-
-    print(len(list(level1.allChunks)))
-    print(len(list(level2.allChunks)))
-    print(level1bounds)
-    print(level2bounds)
-
-    print("destination world bounds", level1bounds)
-    print("source world bounds", level2bounds)
-
-    """
-    # Center world 2 in world 1
-    copyTo = [(level1bounds.origin[i] + (level1bounds.size[i] - level2bounds.size[i]) / 2) for i in range(0, 3)]
-
-    print(copyTo)
-    shift = [(copyTo[i] - level2bounds.origin[i]) for i in range(0, 3)]
-    print("shift: ", shift)
-    """
-
-    print("merging worlds...")
-    level1.copyBlocksFrom(level2, level2bounds, level2bounds.origin)
-    
-    for i in range(0, NUM_WORKERS):
-        workers.append(Eroder(i, level1, erodeQueue, progressQueue))
-        workers[i].start()
-    
-    numTasks = 0
-    level2ChunkSet = set(level2.allChunks)
-    for chunk in level2.allChunks:
-        numTasks += checkChunk(level2, chunk, erodeQueue)
-    
-    start = time.time()
-    print(start)
-    """
-    for (chunkCoords, direction) in toErode:
-        # Things have been shifted. Make sure we're using new coordinates.
-        #chunkCoords = (chunkCoords[0] + shift[X] / 16, chunkCoords[1] + shift[Z] / 16)
-        if chunkCoords in level1.allChunks:
-            chunk = level1.getChunk(chunkCoords[0], chunkCoords[1])
-            erodeQueue.put((chunk, direction))
-            numTasks += 1
-    """
-    
-    # One null task is added to the end of the queue for each worker. A
-    # worker will stop immediately when it gets a null task from the
-    # queue.
-    for worker in workers:
-        erodeQueue.put((None, None))
-    
-    for worker in workers:
-        worker.join()
-    
-    while not progressQueue.empty():
-        coords = progressQueue.get(True)
-        try:
-            chunk = level1.getChunk(coords[0], coords[1])
-            chunk.chunkChanged()
-        except ChunkNotPresent as cnp:
-            pass
-        
-    end = time.time()
-    print(end)
-    print("elapsed: %f" % (end - start))
-
-    level1.saveInPlace()
+        smooth(options.smooth, options.width, edgeFilePath)
 
 if __name__ == "__main__":
     main()
