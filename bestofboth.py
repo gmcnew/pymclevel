@@ -31,36 +31,100 @@ class ErosionTask:
         self.posX = posX
         self.posZ = posZ
     
+    # Returns the altitude at which the water column starts (assuming it
+    # ends at sea level).
+    def waterDepth(self, chunk, x, z):
+        h = WATER_HEIGHT
+        while chunk.Blocks[x, z, h] in [iceID, waterID]:
+            h -= 1
+        return h
+    
+    def getChunksAndWaterDepth(self, level):
+        chunksToEdit = {}
+        chunkWaterDepths = []
+        
+        for cx in range(-1, 1):
+            for cz in range(-1, 1):
+                chunk = level.getChunk(self.posX / 16 + cx, self.posZ / 16 + cz)
+                chunksToEdit[(cx, cz)] = chunk
+                # Find the average water depth along the two borders of this
+                # chunk that contact the other chunks involved in this
+                # erosion task. For example, if this is the top-left chunk,
+                # find the average water depth along its right and bottom
+                # edges.
+                rowX = 0 if cx == 0 else 15
+                rowZ = 0 if cz == 0 else 15
+                sumWaterDepths = 0
+                for x in range(0, 16):
+                    sumWaterDepths += self.waterDepth(chunk, x, rowZ)
+                for z in range(0, 16):
+                    sumWaterDepths += self.waterDepth(chunk, rowX, z)
+            
+                chunkWaterDepths.append(sumWaterDepths / 32)
+        
+        deepestWaterDepth = WATER_HEIGHT
+        for wd in chunkWaterDepths:
+            if wd < deepestWaterDepth:
+                deepestWaterDepth = wd
+        
+        return (chunksToEdit, deepestWaterDepth)
+    
     def run(self, level, erosionWidth, waterWidth):
         raise Exception("not implemented")
     
     # Erodes a column of terrain 1 block wide and 1 block long.
     #
-    # relativeDistance: ranges from 0 (in the middle of the river)
-    #           to 1 (on the edge of the erosion area)
+    # relativeDistance: ranges from -1 (on the far edge of the erosion
+    #           area) to 1 (on the near edge of the erosion area), with
+    #           0 meaning the point is in the middle of the river
     # waterWidth: the width of the river, relative to the width of the erosion
     #           area
-    def erode(self, chunk, x, z, relativeDistance, waterWidth = .375):
+    def erode(self, chunk, x, z, relativeDistance, waterWidth, deepestWaterDepth):
         #print("setting (%d,%d) to h=%d" % (x, z, h))
         
-        relativeDistance = (relativeDistance - waterWidth) / (1 - relativeDistance)
-        
-        currentTerrainHeight = MAX_HEIGHT - 1
-        while chunk.Blocks[x, z, currentTerrainHeight] in leafIDs \
-                or chunk.Blocks[x, z, currentTerrainHeight] == airID:
-            currentTerrainHeight -= 1
-        
-        # relativeDistance is on the interval [0..1],
-        # so h will be on the interval [2^0..2^1], which is [1..2].
-        #h = 2 ** relativeDistance
-        
-        # Shift h to the interval [0..1].
-        #h -= 1
-        #h *= (currentTerrainHeight - WATER_HEIGHT)
-        
-        h = (currentTerrainHeight - WATER_HEIGHT) * relativeDistance
-        
-        h += WATER_HEIGHT
+        if deepestWaterDepth < WATER_HEIGHT and abs(relativeDistance) < waterWidth:
+            # We're in the water and need to slope downward to the ocean
+            # floor at deepestWaterDepth
+            
+            # relativeDistance is on the interval [-waterWidth..waterWidth]
+            # (with -waterWidth corresponding to the ocean side and waterWidth
+            # corresponding to the ocean side).
+            # distanceAcross will be on the interval [0..1] (with 0 being the
+            # near side and 1 being the ocean side).
+            distanceAcross = (relativeDistance - waterWidth) / (-2 * waterWidth)
+            
+            # h should range from WATER_HEIGHT to deepestWaterDepth, depending on
+            # how far across the river we are.
+            h = (deepestWaterDepth - WATER_HEIGHT) * distanceAcross
+            h += WATER_HEIGHT
+            
+        else:
+            # We're on land. Make relativeDistance positive for simplicity.
+            if relativeDistance < 0:
+                relativeDistance *= -1
+            relativeDistance = (relativeDistance - waterWidth) / (1 - relativeDistance)
+            
+            # relativeDistance now measures the relative distance from the
+            # river's edge to the high point (instead of from the river's center
+            # to the high point).
+            
+            currentTerrainHeight = MAX_HEIGHT - 1
+            while chunk.Blocks[x, z, currentTerrainHeight] in leafIDs \
+                    or chunk.Blocks[x, z, currentTerrainHeight] == airID:
+                currentTerrainHeight -= 1
+            
+            # relativeDistance is on the interval [0..1],
+            # so h will be on the interval [2^0..2^1], which is [1..2].
+            #h = 2 ** relativeDistance
+            
+            # Shift h to the interval [0..1].
+            #h -= 1
+            #h *= (currentTerrainHeight - WATER_HEIGHT)
+            
+            h = (currentTerrainHeight - WATER_HEIGHT) * relativeDistance
+            if (h < 0):
+                h = 0
+            h += WATER_HEIGHT
         
         h = int(h)
 
@@ -105,14 +169,8 @@ class CornerErosionTask(ErosionTask):
         return "corner %-2s %d %d" % (Erode.Map[self.cornerDirection], self.posX, self.posZ)
         
     def run(self, level, erosionWidth = 8, waterWidth = 3):
-        chunksToEdit = {}
-        
-        # First, make sure all the chunks we need are present.
         try:
-            for cx in range(-1, 1):
-                for cz in range(-1, 1):
-                    chunk = level.getChunk(self.posX / 16 + cx, self.posZ / 16 + cz)
-                    chunksToEdit[(cx, cz)] = chunk
+            (chunksToEdit, deepestWaterDepth) = self.getChunksAndWaterDepth(level)
         except ChunkNotPresent:
             return False
             
@@ -138,13 +196,10 @@ class CornerErosionTask(ErosionTask):
                         
                         distanceFromCenter = math.sqrt(dx * dx + dz * dz)
                         distanceFromEdge = 8 - distanceFromCenter
-        
-                        if distanceFromEdge < 0:
-                            distanceFromEdge *= -1
                         
-                        if distanceFromEdge < erosionWidth:
+                        if abs(distanceFromEdge) < erosionWidth:
                             relativeDistance = float(distanceFromEdge) / float(erosionWidth)
-                            chunkChanged |= self.erode(chunk, x, z, relativeDistance)
+                            chunkChanged |= self.erode(chunk, x, z, relativeDistance, .375, deepestWaterDepth)
 
                 if chunkChanged:
                     chunk.chunkChanged()
@@ -159,14 +214,8 @@ class EdgeErosionTask(ErosionTask):
         return "edge   %-2s %d %d" % (Erode.Map[self.edgeDirection], self.posX, self.posZ)
         
     def run(self, level, erosionWidth = 8, waterWidth = 3):
-        chunksToEdit = {}
-        
-        # First, make sure all the chunks we need are present.
         try:
-            for cx in range(-1, 1):
-                for cz in range(-1, 1):
-                    chunk = level.getChunk(self.posX / 16 + cx, self.posZ / 16 + cz)
-                    chunksToEdit[(cx, cz)] = chunk
+            (chunksToEdit, deepestWaterDepth) = self.getChunksAndWaterDepth(level)
         except ChunkNotPresent:
             return False
         
@@ -190,13 +239,10 @@ class EdgeErosionTask(ErosionTask):
                             raise Exception("unrecognized edge direction %d (%s)" % (self.edgeDirection, Erode.Map[self.edgeDirection]))
                             
                         distanceFromEdge = 8 - distanceFromCenter
-        
-                        if distanceFromEdge < 0:
-                            distanceFromEdge *= -1
                         
-                        if distanceFromEdge < erosionWidth:
+                        if abs(distanceFromEdge) < erosionWidth:
                             relativeDistance = float(distanceFromEdge) / float(erosionWidth)
-                            chunkChanged |= self.erode(chunk, x, z, relativeDistance)
+                            chunkChanged |= self.erode(chunk, x, z, relativeDistance, .375, deepestWaterDepth)
                             
                 if chunkChanged:
                     chunk.chunkChanged()
