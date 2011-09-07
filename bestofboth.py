@@ -6,10 +6,13 @@ import random
 import re
 import shutil
 import tempfile
+import textwrap
 
 import materials
 import mclevel
 from mclevelbase import ChunkNotPresent
+
+VERSION_STRING = "0.1"
 
 WATER_HEIGHT = 63
 MAX_HEIGHT   = 128
@@ -300,7 +303,6 @@ leafIDs = [
 def find_edges(worldDir, edgeFilename):
     level = mclevel.fromFile(worldDir)
     edgeFile = open(edgeFilename, "w")
-    print("world: %s" % (worldDir))
     print("finding edges...")
     
     erodeQ = Queue.Queue()
@@ -316,9 +318,9 @@ def find_edges(worldDir, edgeFilename):
         edgeFile.write("%s\n" % (task))
         numEdgeChunks += 1
     edgeFile.close()
-    print("found %d perimeter features" % (numEdgeChunks))
+    print("found %d edge(s)" % (numEdgeChunks))
 
-def smooth(worldDir, width, edgeFilename):
+def smooth(worldDir, edgeFilename, width = 16):
     level = mclevel.fromFile(worldDir)
     newEdgeFile = open(edgeFilename + ".tmp", "w")
     edgeFile = open(edgeFilename, "r")
@@ -327,7 +329,6 @@ def smooth(worldDir, width, edgeFilename):
     
     erosionTasks = []
     
-    numChunks = 0
     for line in edgeFile.readlines():
         originalLine = line
         line = line.strip()
@@ -336,39 +337,48 @@ def smooth(worldDir, width, edgeFilename):
             newEdgeFile.write(originalLine)
         else:
             task = ErosionTask.fromString(line)
-            numChunks += 1
             erosionTasks.append(task)
     
     edgeFile.close()
     
-    numEroded = len(erosionTasks)
+    numTasks = len(erosionTasks)
+    
+    skipped = 0
+    smoothed = 0
     
     if erosionTasks:
-        print("smoothing %d perimeter feature(s)..." % (numEroded))
+        print("smoothing %d edge(s)..." % (numTasks))
         
-        i = 0
+        examined = 0
+        
         lastReportedProgress = 0
         for erosionTask in erosionTasks:
-            i += 1
-            progress = i * 100 / numEroded
+            examined += 1
+            progress = examined * 100 / numTasks
             if progress >= lastReportedProgress + 10:
-                lastReportedProgress = progress
-                print("%d%%" % (progress))
+                lastReportedProgress = int(progress / 10) * 10
+                print("%d%%" % (lastReportedProgress))
             
             # If the task didn't run (because it requires chunks that
             # haven't been generated yet), write it back to edges.txt.
-            if not erosionTask.run(level, width):
+            if erosionTask.run(level, width):
+                smoothed += 1
+            else:
+                skipped += 1
                 newEdgeFile.write("%s\n" % (task))
             
         
         level.saveInPlace()
-        print("smoothed %d perimeter feature(s)" % (numEroded))
     
     newEdgeFile.close()
     
-    if numChunks - numEroded:
-        print("%d perimeter feature(s) were not smoothed (since they haven't been explored completely)" % (numChunks - numEroded))
-    elif not numChunks:
+    print("")
+    if smoothed:
+        print("smoothed %d edge(s)" % (smoothed))
+    
+    if skipped:
+        print("%d edge(s) can't be smoothed yet, since they're not fully explored" % (skipped))
+    elif smoothed == numTasks:
         print("the map is perfectly smoothed -- nothing to do!")
     
     shutil.move(newEdgeFile.name, edgeFilename)
@@ -478,48 +488,115 @@ def checkChunk(level, coords, erodeQueue):
     
     return tasksAdded
 
-def main():
+def get_info_text():
+    return "\n".join([
+        "bestofboth version %s" % VERSION_STRING,
+        "(a tool for smoothing terrain discontinuities in Minecraft worlds)",
+        "http://github.com/gmcnew/bestofboth",
+        ""])
+
+def get_usage_text():
     usage = """
-bestofboth --find-edges <path_to_world>
-bestofboth --smooth <path_to_world> [--width <1-16>]
-"""
-    parser = optparse.OptionParser(usage = usage)
-    parser.add_option("--find-edges", dest="find_edges",
-                    help="world to examine")
-    parser.add_option("--smooth", dest="smooth", 
-                    help="world to smooth")
+    bestofboth --find-edges <path_to_world>
+    bestofboth --smooth <path_to_world>"""
+
+    usageWithSmooth = """
+    bestofboth --find-edges <path_to_world>
+    bestofboth --smooth <path_to_world> [--width <1-16>]"""
+    
+    # A paragraph is a list of lines.
+    paragraphs = [[usage]]
+    
+    paragraphs.append(textwrap.wrap(
+        "This script must be run in two steps. The first is the " \
+        "--find-edges step, which examines a world and finds its edges. " \
+        "Next is the --smooth step, which smooths edges by carving a river " \
+        "between old chunks and newly-generated ones."))
+    
+    paragraphs.append(textwrap.wrap(
+        "You can run the --smooth step multiple times as players explore " \
+        "edges and cause new chunks to be generated along them. Eventually, " \
+        "if all chunks next to edges have been generated, the script will " \
+        "report that the map is perfectly smoothed. At this point further use " \
+        "of the script is unnecessary."))
+    
+    paragraphs.append(
+        ["Typical use:"] +
+        [("    %s" % x) for x in [
+            "bestofboth --find-edges <path_to_world>",
+            "<upgrade Minecraft to a version with new terrain generation code>",
+            "...",
+            "<play Minecraft, explore, and cause new terrain to be generated>",
+            "bestofboth --smooth <path_to_world>",
+            "...",
+            "<more exploration and edge discovery>",
+            "bestofboth --smooth <path_to_world>",
+            "...",
+            "<finish exploring edges and new terrain along them>",
+            "bestofboth --smooth <path_to_world>",
+            ]
+        ]
+    )
+    
+    return "\n\n".join(["\n".join(p) for p in paragraphs])
+    
+def main():
+
+    parser = optparse.OptionParser(usage = get_usage_text())
+    parser.add_option("--find-edges",
+                    dest="find_edges",
+                    metavar = "path",
+                    help="path to the world to examine")
+    parser.add_option("--smooth",
+                    dest="smooth",
+                    metavar = "path",
+                    help="path to the world to smooth")
+    """
     parser.add_option("--width", dest="width", 
                     default = "16",
                     help="width of the river")
+    """
+    
+    print(get_info_text())
 
     (options, args) = parser.parse_args()
     
     worldDir = options.find_edges or options.smooth
+    if worldDir:
+        edgeFilePath = os.path.join(worldDir, "edges.txt")
+    
+    errorText = None
     
     if options.find_edges and options.smooth:
-        parser.error("--find-edges and --smooth can't be specified " \
+        errorText = "--find-edges and --smooth can't be specified " \
             "at the same time. Please run with --find-edges first, " \
-            "then run with --smooth.")
+            "then run with --smooth."
     elif not (options.find_edges or options.smooth):
-        parser.error("Must specify --find-edges or --smooth.")
+        parser.print_help()
     elif not os.path.exists(os.path.join(worldDir, "level.dat")):
-            parser.error("'%s' is not a Minecraft world directory (no " \
-                "level.dat file was found)." % (options.worldDir))
-    elif options.smooth and not os.path.exists(os.path.join(options.smooth, "edges.txt")):
-        parser.error("Edge file '%s' does not exist. Run with " \
-            "--find-edges first. The edge file must exist when " \
+        errorText = "'%s' is not a Minecraft world directory (no " \
+            "level.dat file was found)." % (worldDir)
+    elif options.smooth and not os.path.exists(edgeFilePath):
+        errorText = "Edge file '%s' does not exist. Run with " \
+            "--find-edges to create the edge file, which must exist when " \
             "--smooth is specified." \
-            % (os.path.join(options.smooth, "edges.txt")))
+            % (os.path.join(options.smooth, "edges.txt"))
+    
+    if errorText:
+        parser.error("\n" + "\n".join(textwrap.wrap(errorText)))
+    
+    """
     elif options.width and (int(options.width) < 1 or int(options.width) > 16):
         parser.error("--width must be between 1 and 16 (inclusive)")
-    
-    edgeFilePath = os.path.join(worldDir, "edges.txt")
+    """
     
     # Phew! Now that the arguments have been validated...
     if options.find_edges:
-        find_edges(options.find_edges, edgeFilePath)
+        find_edges(worldDir, edgeFilePath)
     elif options.smooth:
-        smooth(options.smooth, options.width, edgeFilePath)
+        # TODO: Fix the "--width" argument.
+        #smooth(options.smooth, edgeFilePath, options.width)
+        smooth(worldDir, edgeFilePath)
 
 if __name__ == "__main__":
     main()
