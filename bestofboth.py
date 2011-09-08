@@ -522,6 +522,16 @@ def checkChunk(level, coords, toErode):
             if not (neighbors[R] or neighbors[TR]):
                 coordsRight = (coords[0] + 1, coords[1])
                 addEdge(coordsRight, toErode, Erode.VE)
+                
+        # These "checkerboard" cases are kind of weird.
+        if neighbors[TL] and not (neighbors[L] or neighbors[T]):
+            addEdge(coords, toErode, Erode.HE)
+            addEdge(coords, toErode, Erode.VE)
+        
+        if neighbors[TR] and not (neighbors[R] or neighbors[T]):
+            coordsRight = (coords[0] + 1, coords[1])
+            addEdge(coordsRight, toErode, Erode.HE)
+            addEdge(coordsRight, toErode, Erode.VE)
     
     return len(toErode)
 
