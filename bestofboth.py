@@ -481,7 +481,7 @@ def get_info_text():
     return "\n".join([
         "bestofboth version %s" % VERSION_STRING,
         "(a tool for smoothing terrain discontinuities in Minecraft worlds)",
-        "http://github.com/gmcnew/bestofboth",
+        "http://github.com/gmcnew/pymclevel",
         ""])
 
 def get_usage_text():
