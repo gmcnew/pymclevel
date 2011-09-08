@@ -139,18 +139,38 @@ class ErosionTask:
         if h < MAX_HEIGHT:
         
             # The height at which air will begin.
-            ah = max(h, WATER_HEIGHT + 1)
+            airHeight = max(h, WATER_HEIGHT + 1)
             
             # If a tree is standing on terrain that will be preserved,
             # preserve the tree, too.
-            while chunk.Blocks[x, z, ah] in logIDs:
-                ah += 1
+            while chunk.Blocks[x, z, airHeight] in logIDs:
+                airHeight += 1
+            
+            surfaceHeight = 127
+            while chunk.Blocks[x, z, surfaceHeight] in leafAndAirIDs:
+                surfaceHeight -= 1
+            
+            # surfaceHeight is the height of the air block immediately above
+            # the surface of the world.
+            surfaceHeight += 1
+            
+            # The terrain between airHeight and surfaceHeight needs to be turned
+            # into air.
+            
+            # Slide terrain downward until it's below airHeight.
+            removeDepth = surfaceHeight - airHeight
+            if removeDepth > (airHeight - WATER_HEIGHT):
+                removeDepth = (airHeight - WATER_HEIGHT)
+            # TODO: See if this breaks trees.
+            for y in range(-removeDepth, 0):
+                chunk.Blocks[x, z, airHeight + y] = chunk.Blocks[x, z, surfaceHeight + y]
+                chunkChanged = True
             
             # Turn everything in this vertical column into air, but
             # leave leaves alone (to avoid weird-looking half-trees).
-            for h2 in range(ah, 128):
-                if chunk.Blocks[x, z, h2] not in leafIDs:
-                    chunk.Blocks[x, z, h2] = airID
+            for ah in range(airHeight, 128):
+                if chunk.Blocks[x, z, ah] not in leafIDs:
+                    chunk.Blocks[x, z, ah] = airID
                     chunkChanged = True
             if h <= WATER_HEIGHT + 1:
                 if h <= WATER_HEIGHT:
@@ -303,6 +323,13 @@ logIDs = [
     ]
 
 leafIDs = [
+    materials.materials.Leaves.ID,
+    materials.materials.PineLeaves.ID,
+    materials.materials.BirchLeaves.ID,
+    ]
+
+leafAndAirIDs = [
+    materials.materials.Air.ID,
     materials.materials.Leaves.ID,
     materials.materials.PineLeaves.ID,
     materials.materials.BirchLeaves.ID,
