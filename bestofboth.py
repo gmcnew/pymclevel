@@ -303,16 +303,15 @@ def find_edges(worldDir, edgeFilename):
     edgeFile = open(edgeFilename, "w")
     print("finding edges...")
     
-    erodeQ = Queue.Queue()
+    erodeTasks = []
     
     for chunk in level.allChunks:
-        checkChunk(level, chunk, erodeQ)
+        checkChunk(level, chunk, erodeTasks)
     
     edgeFile.write("# erodeType erodeDirection posX posZ")
     
     numEdgeChunks = 0
-    while not erodeQ.empty():
-        task = erodeQ.get(True)
+    for task in erodeTasks:
         edgeFile.write("%s\n" % (task))
         numEdgeChunks += 1
     edgeFile.close()
@@ -404,9 +403,7 @@ def addEdge(chunkPos, erodeList, erodeType):
 # Examine a chunk in a level. For each edge that's found, add a
 # (chunk, direction) pair to erodeQueue. Return the number of pairs
 # added to the queue.
-def checkChunk(level, coords, erodeQueue):
-    
-    tasksAdded = 0
+def checkChunk(level, coords, toErode):
     
     aroundMe = [(-1, -1), (0, -1), (1, -1),
                 (-1,  0),          (1,  0),
@@ -421,8 +418,6 @@ def checkChunk(level, coords, erodeQueue):
         if (coords[0] + a[0], coords[1] + a[1]) not in level.allChunks:
             onPerimeter = True
             neighbors[i] = False
-    
-    toErode = []
     
     if onPerimeter:
     
@@ -444,7 +439,7 @@ def checkChunk(level, coords, erodeQueue):
         if not (neighbors[B] or neighbors[BL] or neighbors[L]):
             coordsBelow = (coords[0], coords[1] + 1)
             addCorner(coordsBelow, toErode, Erode.BL)
-    
+        
         # Top-left corner (inverted)
         if neighbors[L] and neighbors[T] and not neighbors[TL]:
             addCorner(coords, toErode, Erode.BR)
@@ -479,12 +474,8 @@ def checkChunk(level, coords, erodeQueue):
             if not (neighbors[R] or neighbors[TR]):
                 coordsRight = (coords[0] + 1, coords[1])
                 addEdge(coordsRight, toErode, Erode.VE)
-        
-    for task in toErode:
-        erodeQueue.put(task)
-        tasksAdded += 1
     
-    return tasksAdded
+    return len(toErode)
 
 def get_info_text():
     return "\n".join([
