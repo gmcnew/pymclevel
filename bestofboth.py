@@ -1,12 +1,10 @@
 import math
 import optparse
 import os
-import Queue
-import random
 import re
 import shutil
-import tempfile
 import textwrap
+import zlib
 
 import materials
 import mclevel
