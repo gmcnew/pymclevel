@@ -308,7 +308,7 @@ def find_edges(worldDir, edgeFilename):
     for chunk in level.allChunks:
         checkChunk(level, chunk, erodeTasks)
     
-    edgeFile.write("# erodeType erodeDirection posX posZ")
+    edgeFile.write("# erodeType erodeDirection posX posZ\n")
     
     numEdgeChunks = 0
     for task in erodeTasks:
