@@ -4,6 +4,7 @@ import os
 import random
 import re
 import shutil
+import sys
 import textwrap
 import zlib
 
@@ -338,12 +339,27 @@ leafAndAirIDs = [
 def find_edges(worldDir, edgeFilename):
     level = mclevel.fromFile(worldDir)
     edgeFile = open(edgeFilename, "w")
-    print("finding edges...")
+    sys.stdout.write("finding edges...")
+    
+    chunks = []
+    
+    for chunk in level.allChunks:
+        chunks.append(chunk)
     
     erodeTasks = []
     
-    for chunk in level.allChunks:
+    examined = 0
+    lastProgress = 0
+    numChunks = len(chunks)
+    
+    for chunk in chunks:
         checkChunk(level, chunk, erodeTasks)
+        examined += 1
+        progress = examined * 100 / numChunks
+        if progress != lastProgress:
+            lastProgress = progress
+            sys.stdout.write("\rfinding edges (%d%%)..." % (progress))
+    print("")
     
     edgeFile.write("# erodeType erodeDirection posX posZ\n")
     
@@ -381,17 +397,10 @@ def smooth(worldDir, edgeFilename, width = 16):
     smoothed = 0
     
     if erosionTasks:
-        print("smoothing %d edge(s)..." % (numTasks))
-        
         examined = 0
-        
-        lastReportedProgress = 0
         for erosionTask in erosionTasks:
             examined += 1
-            progress = examined * 100 / numTasks
-            if progress >= lastReportedProgress + 10:
-                lastReportedProgress = int(progress / 10) * 10
-                print("%d%%" % (lastReportedProgress))
+            sys.stdout.write("\rexamining edge %d of %d..." % (examined, numTasks))
             
             # If the task didn't run (because it requires chunks that
             # haven't been generated yet), write it back to edges.txt.
@@ -403,19 +412,21 @@ def smooth(worldDir, edgeFilename, width = 16):
             
         
         level.saveInPlace()
+        
+        print("")
     
     newEdgeFile.close()
     
-    print("")
     if smoothed:
         print("smoothed %d edge(s)" % (smoothed))
+        shutil.move(newEdgeFile.name, edgeFilename)
+    else:
+        os.remove(newEdgeFile.name)
     
     if skipped:
         print("%d edge(s) can't be smoothed yet, since they're not fully explored" % (skipped))
     elif smoothed == numTasks:
         print("the map is perfectly smoothed -- nothing to do!")
-    
-    shutil.move(newEdgeFile.name, edgeFilename)
 
 def addCorner(chunkPos, erodeList, erodeType):
     (chunkX, chunkZ) = chunkPos
