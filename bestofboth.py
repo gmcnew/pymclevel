@@ -1,6 +1,7 @@
 import math
 import optparse
 import os
+import random
 import re
 import shutil
 import textwrap
@@ -103,9 +104,9 @@ class ErosionTask:
             # We're on land. Make relativeDistance positive for simplicity.
             if relativeDistance < 0:
                 relativeDistance *= -1
-            relativeDistance = (relativeDistance - waterWidth) / (1 - relativeDistance)
+            relativeRiverDistance = (relativeDistance - waterWidth) / (1 - relativeDistance)
             
-            # relativeDistance now measures the relative distance from the
+            # relativeRiverDistance measures the relative distance from the
             # river's edge to the high point (instead of from the river's center
             # to the high point).
             
@@ -122,7 +123,7 @@ class ErosionTask:
             #h -= 1
             #h *= (currentTerrainHeight - WATER_HEIGHT)
             
-            h = (currentTerrainHeight - WATER_HEIGHT) * relativeDistance
+            h = (currentTerrainHeight - WATER_HEIGHT) * relativeRiverDistance
             if (h < 0):
                 h = 0
             h += WATER_HEIGHT
@@ -133,10 +134,12 @@ class ErosionTask:
         
         chunkChanged = False
         
+        blockWasIce = (chunk.Blocks[x, z, WATER_HEIGHT] == iceID)
+        
         if h < MAX_HEIGHT:
         
             # The height at which air will begin.
-            ah = h
+            ah = max(h, WATER_HEIGHT + 1)
             
             # If a tree is standing on terrain that will be preserved,
             # preserve the tree, too.
@@ -158,6 +161,13 @@ class ErosionTask:
                         and chunk.Blocks[x, z, h - 1] != iceID:
                     chunk.Blocks[x, z, h - 1] = sandID
                     chunkChanged = True
+        
+        if blockWasIce:
+            # Restore ice that was far from the center of the river.
+            # A larger relative distance from the center of the river should
+            # result in a greater chance of restoring the block of ice.
+            if random.random() < abs(relativeDistance):
+                chunk.Blocks[x, z, WATER_HEIGHT] = iceID
         
         return chunkChanged
         
@@ -530,7 +540,9 @@ def get_usage_text():
     return "\n\n".join(["\n".join(p) for p in paragraphs])
     
 def main():
-
+    
+    random.seed(0)
+    
     parser = optparse.OptionParser(usage = get_usage_text())
     parser.add_option("--find-edges",
                     dest="find_edges",
