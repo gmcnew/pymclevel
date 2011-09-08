@@ -5,6 +5,7 @@ setup(
     console = ['bestofboth.py'],
     options = {
         "py2exe": {
+            "bundle_files": 2,
             "unbuffered": True,
             "optimize": 2,
             "dll_excludes": ["mswsock.dll", "powrprof.dll", "w9xpopen.exe"],
