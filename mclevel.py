@@ -171,7 +171,7 @@ Copyright 2010 David Rio Vierra
 """
 import os
 from logging import warn, error, info, debug
-from numpy import fromstring
+#from numpy import fromstring
 import nbt
 
 try:

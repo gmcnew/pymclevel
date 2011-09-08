@@ -12,7 +12,7 @@ import itertools
 from contextlib import closing
 import gzip
 
-from numpy import *
+from numpy import array, uint8, zeros
 from logging import warn, error, info, debug
 
 import nbt

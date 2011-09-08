@@ -1,7 +1,7 @@
 '''
 from materials import classicMaterials, materials
 '''
-from numpy import *
+from numpy import arange, array, newaxis, uint8, zeros
 NOTEX = (0xB0, 0x80)
 
 
