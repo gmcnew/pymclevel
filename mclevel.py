@@ -196,10 +196,13 @@ import sys
 if sys.platform == "win32":
     #not sure why win32com is needed if the %APPDATA% var is available
     try:
+        minecraftDir = ""
+        """
         import win32com.client
-
+        
         objShell = win32com.client.Dispatch("WScript.Shell")
         minecraftDir = os.path.join(objShell.SpecialFolders("AppData"), u".minecraft")
+        """
     except Exception, e:
         print "WScript error {0!r}".format(e)
         appdata = os.environ['APPDATA'].decode(sys.getfilesystemencoding());
