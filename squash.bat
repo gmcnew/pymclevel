@@ -1,12 +1,23 @@
+@echo off
+
+rem Run after "python setup.py py2exe"
+rem You will need 7-zip and UPX in your PATH:
+rem   - http://www.7-zip.org/
+rem   - http://upx.sourceforge.net/
+
 cd dist
-set PATH=%PATH%;c:\program files\7-zip
-7z.exe -aoa x library.zip -olibrary\
+
+rem Decompress library.zip
+7z -aoa x library.zip -olibrary\
 del library.zip
 
+rem Recompress library.zip
 cd library\
-7z.exe a -tzip -mx9 ..\library.zip -r
-cd..
+7z a -tzip -mx9 ..\library.zip -r
+cd ..
 rd library /s /q
 
-..\upx307w\upx.exe --best *.*
+rem UPX-compress executables
+upx --best *.*
+
 cd ..
