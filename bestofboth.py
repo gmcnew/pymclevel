@@ -147,69 +147,31 @@ class ErosionTask:
                 airHeight += 1
             
             surfaceHeight = 127
-            # We need to dig through the snow layer, since it might just be on
-            # top of some leaves.
-            while chunk.Blocks[x, z, surfaceHeight] in (leafAndAirIDs + logIDs + [snowLayerID]):
+            
+            erodeDest = airHeight - 1
+            while surfaceHeight > airHeight - 1 and erodeDest > WATER_HEIGHT:
+                block = chunk.Blocks[x, z, surfaceHeight]
+                
+                # If this block is a log that's above dirt, pretend it was a
+                # sapling so that we can be a responsible citizen and replant
+                # the tree.
+                if block in logIDs:
+                    if chunk.Blocks[x, z, surfaceHeight - 1] == dirtID:
+                        # Make sure there's a dirt block below the sapling (so
+                        # it can grow) and an air block above it. (It's possible
+                        # that the block above is a snow layer.)
+                        chunk.Blocks[x, z, erodeDest - 1] = dirtID
+                        chunk.Blocks[x, z, erodeDest]     = sapling[block]
+                        chunk.Blocks[x, z, erodeDest + 1] = airID
+                        chunkChanged = True
+                        erodeDest -= 1
+                
+                # During erosion, skip leaves and air.
+                elif block not in leafAndAirIDs:
+                    chunk.Blocks[x, z, erodeDest] = block
+                    chunkChanged = True
+                    erodeDest -= 1
                 surfaceHeight -= 1
-            
-            # Move back up one block if we're under a snow layer.
-            if chunk.Blocks[x, z, surfaceHeight + 1] == snowLayerID:
-                surfaceHeight += 1
-            
-            # surfaceHeight is now at ground level. If a tree is standing
-            # here, increment surfaceHeight so that the bottommost log will
-            # be part of the shifted column (and we can try planting a sapling).
-            if chunk.Blocks[x, z, surfaceHeight + 1] in logIDs:
-                surfaceHeight += 1
-            
-            # surfaceHeight is the height of the air block immediately
-            # above the surface of the world.
-            surfaceHeight += 1
-            
-            # The terrain between airHeight and surfaceHeight needs to be turned
-            # into air.
-            
-            # Slide terrain downward until it's below airHeight.
-            removeDepth = surfaceHeight - airHeight
-            removeDepth = min(removeDepth, (airHeight - WATER_HEIGHT) - 1)
-            
-            # Slide a slice of terrain downward, starting with the bottom-most
-            # block.
-            for y in range(-removeDepth, 0):
-                newBlockID = chunk.Blocks[x, z, surfaceHeight + y]
-                
-                # The block beneath this block's new location.
-                blockBeneathID = chunk.Blocks[x, z, (airHeight + y) - 1]
-                
-                # If we're moving a snow layer, make sure the block beneath it
-                # will be solid. (Some blocks are turned to air during erosion.)
-                if newBlockID == snowLayerID:
-                    if blockBeneathID == airID:
-                        newBlockID = airID
-                
-                # Don't shift trees downward with the rest of the terrain.
-                # This would be difficult to do, since adjacent 1x1 columns are
-                # almost always shifted by different amounts. Instead, we'll try
-                # to be responsible citizens and plant a new tree for each one
-                # that we kill during the erosion process.
-                elif newBlockID in logIDs:
-                    if blockBeneathID == dirtID:
-                        # This log was on dirt. Replace it with a sapling of the
-                        # correct type.
-                        newBlockID = sapling[newBlockID]
-                        print("using a sapling!")
-                    else:
-                        # This log wasn't on dirt. Turn it into air.
-                        newBlockID = airID
-                
-                # Don't shift leaves, since that could cause weird-looking
-                # trees. (If the leaves aren't next to a nearby log after
-                # the shift, they'll just decay anyway.)
-                elif newBlockID in leafIDs:
-                    newBlockID = airID
-                
-                chunk.Blocks[x, z, airHeight + y] = newBlockID
-                chunkChanged = True
             
             # Turn everything in this vertical column into air, but
             # leave leaves alone (to avoid weird-looking half-trees). Logs may
