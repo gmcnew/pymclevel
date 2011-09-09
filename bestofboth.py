@@ -629,7 +629,12 @@ def main():
         errorText = "Edge file '%s' does not exist. Run with " \
             "--find-edges to create the edge file, which must exist when " \
             "--smooth is specified." \
-            % (os.path.join(options.smooth, "edges.txt"))
+            % (edgeFilePath)
+    elif options.find_edges and os.path.exists(edgeFilePath):
+        errorText = "Edge file '%s' already exists. Did you mean " \
+            "to specify --smooth instead?" \
+            % (edgeFilePath)
+    
     
     if errorText:
         parser.error("\n" + "\n".join(textwrap.wrap(errorText)))
