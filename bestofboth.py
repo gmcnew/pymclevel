@@ -281,19 +281,9 @@ class EdgeErosionTask(ErosionTask):
 
 
 # These values indicate the shape a chunk should have after erosion.
-# T, B, L and R mean "top", "bottom", "left" and "right", respectively.
-# There are two kinds of corners, illustrated by this fine piece of
-# artwork:
-#
-#   a1 a2
-#   a3 b4
-#
-# Imagine maps 'a' and 'b' are being merged. The top-left corner of 'b4'
-# needs to be eroded. This corresponds to "TL" below. The bottom-right
-# corner of 'a1' needs to be eroded as well. However, the shape of this
-# erosion is inverted -- 'a1' is a concave point on 'a', not a convex
-# point. This corresponds to "NBR" below -- the "N" meaning "inverted"
-# and "BL" meaning "bottom-right".
+# T, B, L, and R mean "top", "bottom", "left" and "right", respectively.
+# TL, TR, BL, and BR refer to the four kinds of corners: "top left",
+# "top right", "bottom left", and "bottom right", respectively.
 class Erode:
     Map = [ "TL", "TR", "BL", "BR", "VE", "HE" ]
     TL  = 0 # top-left corner
@@ -302,14 +292,6 @@ class Erode:
     BR  = 3 # bottom-right corner
     VE  = 4 # vertical edge
     HE  = 5 # horizontal edge
-TL = 0
-T  = 1
-TR = 2
-L  = 3
-R  = 4
-BL = 5
-B  = 6
-BR = 7
 
 airID   = materials.materials.Air.ID
 iceID   = materials.materials.Ice.ID
@@ -455,6 +437,8 @@ def checkChunk(level, coords, toErode):
     aroundMe = [(-1, -1), (0, -1), (1, -1),
                 (-1,  0),          (1,  0),
                 (-1,  1), (0,  1), (1,  1)]
+    
+    (TL, T, TR, L, R, BL, B, BR) = range(0, 8)
     
     neighbors = [True] * 8
     
