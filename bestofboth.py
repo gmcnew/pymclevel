@@ -112,8 +112,7 @@ class ErosionTask:
             # to the high point).
             
             currentTerrainHeight = MAX_HEIGHT - 1
-            while chunk.Blocks[x, z, currentTerrainHeight] in leafIDs \
-                    or chunk.Blocks[x, z, currentTerrainHeight] == airID:
+            while chunk.Blocks[x, z, currentTerrainHeight] in leafAndAirIDs:
                 currentTerrainHeight -= 1
             
             # relativeDistance is on the interval [0..1],
