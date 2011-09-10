@@ -143,7 +143,7 @@ class ErosionTask:
             
             # If a tree is standing on terrain that will be preserved,
             # preserve the tree, too.
-            while chunk.Blocks[x, z, airHeight] in logIDs:
+            while chunk.Blocks[x, z, airHeight] == logID:
                 airHeight += 1
             
             surfaceHeight = 127
@@ -151,17 +151,19 @@ class ErosionTask:
             erodeDest = airHeight - 1
             while surfaceHeight > airHeight - 1 and erodeDest > WATER_HEIGHT:
                 block = chunk.Blocks[x, z, surfaceHeight]
+                data  = chunk.Data  [x, z, surfaceHeight]
                 
                 # If this block is a log that's above dirt, pretend it was a
                 # sapling so that we can be a responsible citizen and replant
                 # the tree.
-                if block in logIDs:
+                if block == logID:
                     if chunk.Blocks[x, z, surfaceHeight - 1] == dirtID:
                         # Make sure there's a dirt block below the sapling (so
                         # it can grow) and an air block above it. (It's possible
                         # that the block above is a snow layer.)
                         chunk.Blocks[x, z, erodeDest - 1] = dirtID
-                        chunk.Blocks[x, z, erodeDest]     = sapling[block]
+                        chunk.Blocks[x, z, erodeDest]     = saplingID
+                        chunk.Data  [x, z, erodeDest]     = saplingData[data]
                         chunk.Blocks[x, z, erodeDest + 1] = airID
                         chunkChanged = True
                         erodeDest -= 1
@@ -177,9 +179,11 @@ class ErosionTask:
             # leave leaves alone (to avoid weird-looking half-trees). Logs may
             # be destroyed during erosion, so some leaves may no longer be near
             # any logs, but these leaves will decay naturally in the game.
+            chunk.Data[x, z, airHeight : 128] = 0
             for ah in range(airHeight, 128):
-                if chunk.Blocks[x, z, ah] not in leafIDs:
+                if chunk.Blocks[x, z, ah] != leafID:
                     chunk.Blocks[x, z, ah] = airID
+                    chunk.Data  [x, z, ah] = 0
                     chunkChanged = True
             if h <= WATER_HEIGHT + 1:
                 if h <= WATER_HEIGHT:
@@ -305,37 +309,25 @@ class Erode:
 airID       = materials.materials.Air.ID
 dirtID      = materials.materials.Dirt.ID
 iceID       = materials.materials.Ice.ID
+leafID      = materials.materials.Leaves.ID
+logID       = materials.materials.Wood.ID
 sandID      = materials.materials.Sand.ID
+saplingID   = materials.materials.Sapling.ID
 snowLayerID = materials.materials.SnowLayer.ID
 vineID      = 106
 waterID     = materials.materials.WaterStill.ID
-    
-logIDs = [  
-    materials.materials.Wood.ID,
-    materials.materials.Ironwood.ID,
-    materials.materials.BirchWood.ID,
-    ]
 
 # Map log IDs to the corresponding sapling types. This is used when replanting
 # trees.
-sapling = {
-    materials.materials.Wood.ID:        materials.materials.Sapling.ID,
-    materials.materials.Ironwood.ID:    materials.materials.SpruceSapling.ID,
-    materials.materials.BirchWood.ID:   materials.materials.BirchSapling.ID,
+saplingData = {
+    materials.materials.Wood.blockData:         materials.materials.Sapling.blockData,
+    materials.materials.Ironwood.blockData:     materials.materials.SpruceSapling.blockData,
+    materials.materials.BirchWood.blockData:    materials.materials.BirchSapling.blockData,
 }
 
-leafIDs = [
-    materials.materials.Leaves.ID,
-    materials.materials.PineLeaves.ID,
-    materials.materials.BirchLeaves.ID,
-    vineID,
-    ]
-
 leafAndAirIDs = [
-    materials.materials.Air.ID,
-    materials.materials.Leaves.ID,
-    materials.materials.PineLeaves.ID,
-    materials.materials.BirchLeaves.ID,
+    airID,
+    leafID,
     vineID,
     ]
 
