@@ -307,6 +307,7 @@ dirtID      = materials.materials.Dirt.ID
 iceID       = materials.materials.Ice.ID
 sandID      = materials.materials.Sand.ID
 snowLayerID = materials.materials.SnowLayer.ID
+vineID      = 106
 waterID     = materials.materials.WaterStill.ID
     
 logIDs = [  
@@ -327,6 +328,7 @@ leafIDs = [
     materials.materials.Leaves.ID,
     materials.materials.PineLeaves.ID,
     materials.materials.BirchLeaves.ID,
+    vineID,
     ]
 
 leafAndAirIDs = [
@@ -334,6 +336,7 @@ leafAndAirIDs = [
     materials.materials.Leaves.ID,
     materials.materials.PineLeaves.ID,
     materials.materials.BirchLeaves.ID,
+    vineID,
     ]
 
 def find_edges(worldDir, edgeFilename):
