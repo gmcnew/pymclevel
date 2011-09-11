@@ -20,11 +20,18 @@ WATER_HEIGHT = 63
 MAX_HEIGHT   = 128
 
 # The six orthogonal directions: up, down, left, right, front, and back.
-neighborPositions = [
+ORTHOGONAL_NEIGHBOR_POSITIONS = [
     (-1, 0, 0), (1, 0, 0),
     (0, -1, 0), (0, 1, 0),
     (0, 0, -1), (0, 0, 1),
     ]
+
+ALL_NEIGHBOR_POSITIONS = []
+for x in range(-1, 2):
+    for z in range(-1, 2):
+        for y in range(-1, 2):
+            if x or z or y:
+                ALL_NEIGHBOR_POSITIONS.append((x, z, y))
 
 class ErosionTask:
     @staticmethod
@@ -61,7 +68,7 @@ class ErosionTask:
             chunk = level.getChunk(fx / 16, fz / 16)
             blockID = chunk.Blocks[fx % 16, fz % 16, fy]
             if blockID == leafID:
-                for nPos in neighborPositions:
+                for nPos in ORTHOGONAL_NEIGHBOR_POSITIONS:
                     (nx, nz, ny) = map(operator.add, (fx, fz, fy), nPos)
                     if (nx, nz, ny) not in visited:
                         visited.add((nx, nz, ny))
@@ -227,8 +234,9 @@ class ErosionTask:
                         chunkChanged = True
                         erodeDest -= 2
                 
-                # During erosion, skip leaves and air.
-                elif block not in leafAndAirIDs:
+                # During erosion, skip leaves and air and logs.
+                elif block not in leafAndAirIDs \
+                        and not block == logID:
                     chunk.Blocks[x, z, erodeDest] = block
                     chunkChanged = True
                     erodeDest -= 1
@@ -238,7 +246,7 @@ class ErosionTask:
             # leave leaves alone (to avoid weird-looking half-trees). Leaves
             # will be decayed elsewhere.
             for ah in range(airHeight, 128):
-                if chunk.Blocks[x, z, ah] != leafID:
+                if chunk.Blocks[x, z, ah] not in [leafID, logID]:
                     chunk.Blocks[x, z, ah] = airID
                     chunk.Data  [x, z, ah] = 0
             if h <= WATER_HEIGHT + 1:
@@ -446,14 +454,14 @@ def find_edges(worldDir, edgeFilename):
 
 # Remove this leaf block (and collapse the snow above it). Also works for vines:
 # if this is a vine block, it and any vines directly beneath it will be removed.
-def remove_leaf_block(chunk, relX, relZ, relY):
+def remove_leaf_block(chunk, relX, relZ, relY, distance = 0):
     blockID = chunk.Blocks[relX, relZ, relY]
     
     turnToAir = []
     
     if blockID == leafID:
-        chunk.Blocks[relX, relZ, relY] = airID
-        chunk.Data  [relX, relZ, relY] = 0
+        chunk.Blocks[relX, relZ, relY] = airID #materials.materials.WhiteWool.ID
+        chunk.Data  [relX, relZ, relY] = 0 #distance
     
         # If this leaf had a snow layer above it, make the snow fall to the
         # next-lowest block.
@@ -479,22 +487,70 @@ def remove_leaf_block(chunk, relX, relZ, relY):
             chunk.Data  [relX, relZ, vineY] = 0
             vineY -= 1
         chunk.chunkChanged()
+    
+    elif blockID == logID:
+        chunk.Blocks[relX, relZ, relY] = airID
+        chunk.Data  [relX, relZ, relY] = 0
+        chunk.chunkChanged()
 
 def decay_leaves(level, decayList):
     # decayList is a list of locations of logs which have been removed.
     # Leaves further than 4 blocks from one of these removed logs should be
     # decayed.
-    decayQueue = Queue.PriorityQueue()
+    logQueue = Queue.PriorityQueue()
     for (chunk, x, z, y) in decayList:
         # x and z are relative to the chunk. Let's make them universal.
         x += chunk.chunkPosition[0] * 16
         z += chunk.chunkPosition[1] * 16
         #print("%s %d,%d,%d" % (chunk, x, y, z))
-        decayQueue.put((0, x, z, y))
+        logQueue.put((0, x, z, y))
     
-    # Leaves can be up to 4 blocks from a trunk, and vines (which we also care
+    # Leaves can be up to 5 blocks from a trunk, and vines (which we also care
     # about) can be 1 block further.
-    DECAY_DISTANCE_LIMIT = 5
+    DECAY_DISTANCE_LIMIT = 6
+    
+    # First, find all logs that are attached to this tree.
+    logs = set()
+    maxSize = 0
+    while not logQueue.empty():
+        maxSize = max(logQueue.qsize(), maxSize)
+        (distance, x, z, y) = logQueue.get()
+        sys.stdout.write("\r  log queue size: %d (max: %d)%s" % (logQueue.qsize(), maxSize, " " * 20))
+        treeLogQueue = Queue.PriorityQueue()
+        treeLogQueue.put((x, z, y, False))
+        treeLogs = set()
+        groundFound = False
+        while not (treeLogQueue.empty() or groundFound):
+            (x, z, y, fromAbove) = treeLogQueue.get()
+            if (x, z, y) not in treeLogs:
+                isLog = False
+                
+                (relX, relZ, relY) = (x % 16, z % 16, y)
+                chunk = level.getChunk(x / 16, z / 16)
+                blockID = chunk.Blocks[relX, relZ, relY]
+                if blockID == logID:
+                    isLog = True
+                    #chunk.Blocks[relX, relZ, relY] = airID #materials.materials.LavaStill.ID
+                    #chunk.Data  [relX, relZ, relY] = 0
+                    #chunk.chunkChanged()
+                elif fromAbove and blockID in [dirtID, grassID]:
+                    groundFound = True
+                
+                if isLog:
+                    treeLogs.add((x, z, y))
+                    for nPos in ALL_NEIGHBOR_POSITIONS:
+                        fromAbove = (nPos == (0, 0, -1))
+                        (nx, nz, ny) = map(operator.add, (x, z, y), nPos)
+                        treeLogQueue.put((nx, nz, ny, fromAbove))
+        if not groundFound:
+            logs |= treeLogs
+        #else:
+        #    print("found the ground!")
+    
+    decayQueue = Queue.PriorityQueue()
+    for (x, z, y) in logs:
+        decayQueue.put((0, x, z, y))
+    print("")
     
     maxSize = 0
     while not decayQueue.empty():
@@ -509,7 +565,7 @@ def decay_leaves(level, decayList):
         chunk = level.getChunk(x / 16, z / 16)
         blockID = chunk.Blocks[relX, relZ, relY]
         
-        checkNeighbors = False
+        neighborPositions = []
         
         # A list of chunk-relative Y-coordinates (at relX, relZ) which should be
         # turned into air blocks.
@@ -517,17 +573,15 @@ def decay_leaves(level, decayList):
         
         # distance = 0 corresponds to logs which were removed during erosion.
         if distance == 0:
-            checkNeighbors = True
-        
+            neighborPositions = ORTHOGONAL_NEIGHBOR_POSITIONS
         elif blockID == leafID:
-            checkNeighbors = True
+            neighborPositions = ORTHOGONAL_NEIGHBOR_POSITIONS
         
-        remove_leaf_block(chunk, relX, relZ, relY)
+        remove_leaf_block(chunk, relX, relZ, relY, distance)
         
-        if checkNeighbors:
-            for nPos in neighborPositions:
-                (nx, nz, ny) = map(operator.add, (x, z, y), nPos)
-                decayQueue.put((distance + 1, nx, nz, ny))
+        for nPos in neighborPositions:
+            (nx, nz, ny) = map(operator.add, (x, z, y), nPos)
+            decayQueue.put((distance + 1, nx, nz, ny))
     
     print("")
 
