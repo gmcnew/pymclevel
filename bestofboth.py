@@ -123,7 +123,7 @@ class ErosionTask:
             
                 chunkWaterDepths.append(sumWaterDepths / 32)
         
-        deepestWaterDepth = WATER_HEIGHT
+        deepestWaterDepth = WATER_HEIGHT - 1
         for wd in chunkWaterDepths:
             if wd < deepestWaterDepth:
                 deepestWaterDepth = wd
