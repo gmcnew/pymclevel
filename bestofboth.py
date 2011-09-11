@@ -405,11 +405,13 @@ vinesID     = 106
 waterID     = materials.materials.WaterStill.ID
 
 # Map log IDs to the corresponding sapling types. This is used when replanting
-# trees.
+# trees on eroded slopes. Since normal trees are the only ones that can grow in
+# a 1x1 column, we'll only use normal saplings. (Other saplings might not be
+# able to grow.)
 saplingData = {
     materials.materials.Wood.blockData:         materials.materials.Sapling.blockData,
-    materials.materials.Ironwood.blockData:     materials.materials.SpruceSapling.blockData,
-    materials.materials.BirchWood.blockData:    materials.materials.BirchSapling.blockData,
+    materials.materials.Ironwood.blockData:     materials.materials.Sapling.blockData,
+    materials.materials.BirchWood.blockData:    materials.materials.Sapling.blockData,
 }
 
 leafAndAirIDs = [
