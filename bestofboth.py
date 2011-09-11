@@ -1,6 +1,8 @@
 import math
+import operator
 import optparse
 import os
+import Queue
 import random
 import re
 import shutil
@@ -72,9 +74,6 @@ class ErosionTask:
         
         return (chunksToEdit, deepestWaterDepth)
     
-    def run(self, level, erosionWidth, waterWidth):
-        raise Exception("not implemented")
-    
     # Erodes a column of terrain 1 block wide and 1 block long.
     #
     # relativeDistance: ranges from -1 (on the far edge of the erosion
@@ -82,7 +81,7 @@ class ErosionTask:
     #           0 meaning the point is in the middle of the river
     # waterWidth: the width of the river, relative to the width of the erosion
     #           area
-    def erode(self, chunk, x, z, relativeDistance, waterWidth, deepestWaterDepth):
+    def erode(self, chunk, decayList, x, z, relativeDistance, waterWidth, deepestWaterDepth):
         #print("setting (%d,%d) to h=%d" % (x, z, h))
         
         if deepestWaterDepth < WATER_HEIGHT and abs(relativeDistance) < waterWidth:
@@ -134,10 +133,10 @@ class ErosionTask:
         
         chunkChanged = False
         
-        blockWasIce = (chunk.Blocks[x, z, WATER_HEIGHT] == iceID)
-        
         if h < MAX_HEIGHT:
         
+            blockWasIce = (chunk.Blocks[x, z, WATER_HEIGHT] == iceID)
+            
             # The height at which air will begin.
             airHeight = max(h, WATER_HEIGHT + 1)
             
@@ -145,6 +144,10 @@ class ErosionTask:
             # preserve the tree, too.
             while chunk.Blocks[x, z, airHeight] == logID:
                 airHeight += 1
+            
+            for logHeight in range(airHeight, MAX_HEIGHT):
+                if chunk.Blocks[x, z, logHeight] == logID:
+                    decayList.append((chunk, x, z, logHeight))
             
             surfaceHeight = 127
             
@@ -157,16 +160,16 @@ class ErosionTask:
                 # sapling so that we can be a responsible citizen and replant
                 # the tree.
                 if block == logID:
-                    if chunk.Blocks[x, z, surfaceHeight - 1] == dirtID:
+                    if chunk.Blocks[x, z, surfaceHeight - 1] in [dirtID, grassID]:
                         # Make sure there's a dirt block below the sapling (so
                         # it can grow) and an air block above it. (It's possible
                         # that the block above is a snow layer.)
-                        chunk.Blocks[x, z, erodeDest - 1] = dirtID
+                        chunk.Blocks[x, z, erodeDest - 1] = grassID
                         chunk.Blocks[x, z, erodeDest]     = saplingID
                         chunk.Data  [x, z, erodeDest]     = saplingData[data]
                         chunk.Blocks[x, z, erodeDest + 1] = airID
                         chunkChanged = True
-                        erodeDest -= 1
+                        erodeDest -= 2
                 
                 # During erosion, skip leaves and air.
                 elif block not in leafAndAirIDs:
@@ -176,31 +179,28 @@ class ErosionTask:
                 surfaceHeight -= 1
             
             # Turn everything in this vertical column into air, but
-            # leave leaves alone (to avoid weird-looking half-trees). Logs may
-            # be destroyed during erosion, so some leaves may no longer be near
-            # any logs, but these leaves will decay naturally in the game.
-            chunk.Data[x, z, airHeight : 128] = 0
+            # leave leaves alone (to avoid weird-looking half-trees). Leaves
+            # will be decayed elsewhere.
             for ah in range(airHeight, 128):
                 if chunk.Blocks[x, z, ah] != leafID:
                     chunk.Blocks[x, z, ah] = airID
                     chunk.Data  [x, z, ah] = 0
-                    chunkChanged = True
             if h <= WATER_HEIGHT + 1:
                 if h <= WATER_HEIGHT:
                     chunk.Blocks[x, z, h : WATER_HEIGHT + 1] = waterID
-                    chunkChanged = True
                 # Turn non-water, non-ice blocks along the shoreline, or under the water, into sand.
                 if chunk.Blocks[x, z, h - 1] != waterID \
                         and chunk.Blocks[x, z, h - 1] != iceID:
                     chunk.Blocks[x, z, h - 1] = sandID
-                    chunkChanged = True
-        
-        if blockWasIce:
-            # Restore ice that was far from the center of the river.
-            # A larger relative distance from the center of the river should
-            # result in a greater chance of restoring the block of ice.
-            if random.random() < abs(relativeDistance):
-                chunk.Blocks[x, z, WATER_HEIGHT] = iceID
+            
+            if blockWasIce:
+                # Restore ice that was far from the center of the river.
+                # A larger relative distance from the center of the river should
+                # result in a greater chance of restoring the block of ice.
+                if random.random() < abs(relativeDistance):
+                    chunk.Blocks[x, z, WATER_HEIGHT] = iceID
+            
+            chunkChanged = True
         
         return chunkChanged
         
@@ -212,7 +212,7 @@ class CornerErosionTask(ErosionTask):
     def __repr__(self):
         return "corner %-2s %d %d" % (Erode.Map[self.cornerDirection], self.posX, self.posZ)
         
-    def run(self, level, erosionWidth = 8, waterWidth = 3):
+    def run(self, level, decayList, erosionWidth = 8, waterWidth = 3):
         try:
             (chunksToEdit, deepestWaterDepth) = self.getChunksAndWaterDepth(level)
         except ChunkNotPresent:
@@ -243,7 +243,7 @@ class CornerErosionTask(ErosionTask):
                         
                         if abs(distanceFromEdge) < erosionWidth:
                             relativeDistance = float(distanceFromEdge) / float(erosionWidth)
-                            chunkChanged |= self.erode(chunk, x, z, relativeDistance, .375, deepestWaterDepth)
+                            chunkChanged |= self.erode(chunk, decayList, x, z, relativeDistance, .375, deepestWaterDepth)
 
                 if chunkChanged:
                     chunk.chunkChanged()
@@ -257,7 +257,7 @@ class EdgeErosionTask(ErosionTask):
     def __repr__(self):
         return "edge   %-2s %d %d" % (Erode.Map[self.edgeDirection], self.posX, self.posZ)
         
-    def run(self, level, erosionWidth = 8, waterWidth = 3):
+    def run(self, level, decayList, erosionWidth = 8, waterWidth = 3):
         try:
             (chunksToEdit, deepestWaterDepth) = self.getChunksAndWaterDepth(level)
         except ChunkNotPresent:
@@ -286,7 +286,7 @@ class EdgeErosionTask(ErosionTask):
                         
                         if abs(distanceFromEdge) < erosionWidth:
                             relativeDistance = float(distanceFromEdge) / float(erosionWidth)
-                            chunkChanged |= self.erode(chunk, x, z, relativeDistance, .375, deepestWaterDepth)
+                            chunkChanged |= self.erode(chunk, decayList, x, z, relativeDistance, .375, deepestWaterDepth)
                             
                 if chunkChanged:
                     chunk.chunkChanged()
@@ -308,13 +308,14 @@ class Erode:
 
 airID       = materials.materials.Air.ID
 dirtID      = materials.materials.Dirt.ID
+grassID     = materials.materials.Grass.ID
 iceID       = materials.materials.Ice.ID
 leafID      = materials.materials.Leaves.ID
 logID       = materials.materials.Wood.ID
 sandID      = materials.materials.Sand.ID
 saplingID   = materials.materials.Sapling.ID
 snowLayerID = materials.materials.SnowLayer.ID
-vineID      = 106
+vinesID      = 106
 waterID     = materials.materials.WaterStill.ID
 
 # Map log IDs to the corresponding sapling types. This is used when replanting
@@ -328,7 +329,7 @@ saplingData = {
 leafAndAirIDs = [
     airID,
     leafID,
-    vineID,
+    vinesID,
     ]
 
 def find_edges(worldDir, edgeFilename):
@@ -365,6 +366,86 @@ def find_edges(worldDir, edgeFilename):
     edgeFile.close()
     print("found %d edge(s)" % (numEdgeChunks))
 
+def decay_leaves(level, decayList):
+    # decayList is a list of locations of logs which have been removed.
+    # Leaves further than 4 blocks from one of these removed logs should be
+    # decayed.
+    decayQueue = Queue.PriorityQueue()
+    for (chunk, x, z, y) in decayList:
+        # x and z are relative to the chunk. Let's make them universal.
+        x += chunk.chunkPosition[0] * 16
+        z += chunk.chunkPosition[1] * 16
+        #print("%s %d,%d,%d" % (chunk, x, y, z))
+        decayQueue.put((0, x, z, y))
+    
+    neighborPositions = [
+        (-1, 0, 0), (1, 0, 0),
+        (0, -1, 0), (0, 1, 0),
+        (0, 0, -1), (0, 0, 1),
+        ]
+    
+    DECAY_DISTANCE_LIMIT = 5
+    
+    maxSize = 0
+    while not decayQueue.empty():
+        maxSize = max(decayQueue.qsize(), maxSize)
+        sys.stdout.write("\r  decay queue size: %8d (max: %8d)" % (decayQueue.qsize(), maxSize))
+        (distance, x, z, y) = decayQueue.get()
+        
+        #if distance > DECAY_DISTANCE_LIMIT:
+        #    continue
+        
+        (relX, relZ, relY) = (x % 16, z % 16, y)
+        chunk = level.getChunk(x / 16, z / 16)
+        blockID = chunk.Blocks[relX, relZ, relY]
+        
+        checkNeighbors = False
+        
+        # A list of chunk-relative Y-coordinates (at relX, relZ) which should be
+        # turned into air blocks.
+        turnToAir = []
+        
+        # distance = 0 corresponds to logs which were removed during erosion.
+        if distance == 0:
+            checkNeighbors = True
+        
+        elif blockID == leafID:
+            turnToAir.append(relY)
+            checkNeighbors = True
+        
+        elif blockID == snowLayerID:
+            # Make this snow layer fall to a block below.
+            snowY = relY
+            while chunk.Blocks[relX, relZ, snowY - 1] == airID:
+                snowY -= 1
+            
+            # If the snow layer has fallen, turn its former location to air and
+            # its new location to snow.
+            if snowY != y:
+                turnToAir.append(relY)
+                chunk.Blocks[relX, relZ, snowY] = snowLayerID
+                chunk.chunkChanged()
+        
+        elif blockID == vinesID:
+            # Destroy this vine block and any vines beneath it.
+            vineY = relY
+            while chunk.Blocks[relX, relZ, vineY] == vinesID:
+                turnToAir.append(vineY)
+                vineY -= 1
+        
+        if turnToAir:
+            for airY in turnToAir:
+                chunk.Blocks[relX, relZ, airY] = airID
+                chunk.Data  [relX, relZ, airY] = 0
+            chunk.chunkChanged()
+        
+        if checkNeighbors:
+            for nPos in neighborPositions:
+                (nx, nz, ny) = map(operator.add, (x, z, y), nPos)
+                decayQueue.put((distance + 1, nx, nz, ny))
+    
+    print("")
+
 def smooth(worldDir, edgeFilename, width = 16):
     level = mclevel.fromFile(worldDir)
     newEdgeFile = open(edgeFilename + ".tmp", "w")
@@ -391,6 +472,8 @@ def smooth(worldDir, edgeFilename, width = 16):
     skipped = 0
     smoothed = 0
     
+    decayList = []
+    
     if erosionTasks:
         examined = 0
         for erosionTask in erosionTasks:
@@ -399,16 +482,18 @@ def smooth(worldDir, edgeFilename, width = 16):
             
             # If the task didn't run (because it requires chunks that
             # haven't been generated yet), write it back to edges.txt.
-            if erosionTask.run(level, width):
+            if erosionTask.run(level, decayList, width):
                 smoothed += 1
             else:
                 skipped += 1
                 newEdgeFile.write("%s\n" % (task))
-            
-        
-        level.saveInPlace()
-        
         print("")
+        
+        print("decaying leaves/vines from %d eroded tree blocks..." % (len(decayList)))
+        decay_leaves(level, decayList)
+        
+        print("saving changes...")
+        level.saveInPlace()
     
     newEdgeFile.close()
     
