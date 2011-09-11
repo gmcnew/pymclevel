@@ -19,6 +19,13 @@ VERSION_STRING = "0.1"
 WATER_HEIGHT = 63
 MAX_HEIGHT   = 128
 
+# The six orthogonal directions: up, down, left, right, front, and back.
+neighborPositions = [
+    (-1, 0, 0), (1, 0, 0),
+    (0, -1, 0), (0, 1, 0),
+    (0, 0, -1), (0, 0, 1),
+    ]
+
 class ErosionTask:
     @staticmethod
     def fromString(string):
@@ -35,6 +42,59 @@ class ErosionTask:
     def __init__(self, posX, posZ):
         self.posX = posX
         self.posZ = posZ
+    
+    def removeOrphanLeaf(self, level, x, z, y):
+        # This is basically a block-fill algorithm: find all leaf blocks
+        # connected to this one. If no log block is found on the way,
+        # delete the whole group of leaf blocks.
+        
+        trunkFound = False
+        frontier = []
+        visited = set()
+        frontier.append((x, z, y))
+        visited.add((x, z, y))
+
+        while frontier:
+            fPos = frontier.pop()
+            sys.stdout.write("\rfPos %s, frontier size: %d..." % (fPos, len(frontier)))
+            (fx, fz, fy) = fPos
+            chunk = level.getChunk(fx / 16, fz / 16)
+            blockID = chunk.Blocks[fx % 16, fz % 16, fy]
+            if blockID == leafID:
+                for nPos in neighborPositions:
+                    (nx, nz, ny) = map(operator.add, (fx, fz, fy), nPos)
+                    #print("adding %s to %s yields %s" % ((fx, fz, fy), nPos, (nx, nz, ny)))
+                    if (nx, nz, ny) not in visited:
+                        visited.add((nx, nz, ny))
+                        frontier.append((nx, nz, ny))
+            elif blockID == logID:
+                trunkFound = True
+        
+        if not trunkFound:
+            first = True
+            for (vx, vz, vy) in visited:
+                if first:
+                    print("no trunk found, removing blocks from %d,%d,%d" % (vx, vz, vy))
+                    first = False
+                # Some of these visited blocks aren't leaf blocks, but
+                # that's okay, because removeLeafBlock() will ignore
+                # them.
+                chunk = level.getChunk(vx / 16, vz / 16)
+                remove_leaf_block(chunk, vx % 16, vz % 16, vy)
+    
+    # Searches a column of a chunk for leaves. If leaves are found that are not
+    # connected to a tree trunk, they will be turned into air.
+    def removeOrphanLeaves(self, level, startChunk, relX, relZ):
+        
+        x = relX + startChunk.chunkPosition[0] * 16
+        z = relZ + startChunk.chunkPosition[1] * 16
+        
+        #print("removing orphan leaves from column %d,%d" % (x, z))
+        
+        # There shouldn't be any orphaned leaves below sea level.
+        for y in range(WATER_HEIGHT, 128):
+            if startChunk.Blocks[relX, relZ, y] == leafID:
+                self.removeOrphanLeaf(level, x, z, y)
     
     # Returns the altitude at which the water column starts (assuming it
     # ends at sea level).
@@ -235,6 +295,14 @@ class CornerErosionTask(ErosionTask):
                 highPointZ = highPoint[1] - (cz * 16)
                 for x in range(-8 * cx, -8 * (cx - 1)):
                     for z in range(-8 * cz, -8 * (cz - 1)):
+                        # This is the edge of a chunk. Leaves on the edge of the
+                        # world may not have a trunk attached to them (since the
+                        # terrain which was supposed to have the trunk was never
+                        # generated). These leaves should be examined and
+                        # possibly removed.
+                        if (cx == -1 and x == 15) or (cx == 0 and x == 0) \
+                                or (cz == -1 and z == 15) or (cz == 0 and z == 0):
+                            self.removeOrphanLeaves(level, chunk, x, z)
                         dx = x - (highPointX - 0.5)
                         dz = z - (highPointZ - 0.5)
                         
@@ -271,6 +339,20 @@ class EdgeErosionTask(ErosionTask):
                 zMin = -8 * cz
                 zMax = -8 * (cz - 1)
                 chunk = chunksToEdit[(cx, cz)]
+                
+                # This may be the edge of a chunk. Leaves on the edge of the
+                # world may not have a trunk attached to them (since the terrain
+                # which was supposed to have the trunk was never generated).
+                # These leaves should be examined and possibly removed.
+                if self.edgeDirection == Erode.HE:
+                    z = 15 if cz == -1 else 0
+                    for x in range(0, 16):
+                        self.removeOrphanLeaves(level, chunk, x, z)
+                elif self.edgeDirection == Erode.VE:
+                    x = 15 if cx == -1 else 0
+                    for z in range(0, 16):
+                        self.removeOrphanLeaves(level, chunk, x, z)
+                                
                 for x in range(xMin, xMax):
                     for z in range(zMin, zMax):
                         if self.edgeDirection == Erode.HE:
@@ -366,6 +448,42 @@ def find_edges(worldDir, edgeFilename):
     edgeFile.close()
     print("found %d edge(s)" % (numEdgeChunks))
 
+# Remove this leaf block (and collapse the snow above it). Also works for vines:
+# if this is a vine block, it and any vines directly beneath it will be removed.
+def remove_leaf_block(chunk, relX, relZ, relY):
+    blockID = chunk.Blocks[relX, relZ, relY]
+    
+    turnToAir = []
+    
+    if blockID == leafID:
+        chunk.Blocks[relX, relZ, relY] = airID
+        chunk.Data  [relX, relZ, relY] = 0
+    
+        # If this leaf had a snow layer above it, make the snow fall to the
+        # next-lowest block.
+        if chunk.Blocks[relX, relZ, relY + 1] == snowLayerID:
+            snowY = relY + 1
+            while chunk.Blocks[relX, relZ, snowY - 1] == airID:
+                snowY -= 1
+            
+            # If the snow layer has fallen, turn its former location to air and
+            # its new location to snow.
+            if snowY != relY:
+                chunk.Blocks[relX, relZ, relY + 1] = airID
+                chunk.Data  [relX, relZ, relY + 1] = 0
+                chunk.Blocks[relX, relZ, snowY] = snowLayerID
+        
+        chunk.chunkChanged()
+    
+    elif blockID == vinesID:
+        # Destroy this vine block and any vines beneath it.
+        vineY = relY
+        while chunk.Blocks[relX, relZ, vineY] == vinesID:
+            chunk.Blocks[relX, relZ, vineY] = airID
+            chunk.Data  [relX, relZ, vineY] = 0
+            vineY -= 1
+        chunk.chunkChanged()
+
 def decay_leaves(level, decayList):
     # decayList is a list of locations of logs which have been removed.
     # Leaves further than 4 blocks from one of these removed logs should be
@@ -377,12 +495,6 @@ def decay_leaves(level, decayList):
         z += chunk.chunkPosition[1] * 16
         #print("%s %d,%d,%d" % (chunk, x, y, z))
         decayQueue.put((0, x, z, y))
-    
-    neighborPositions = [
-        (-1, 0, 0), (1, 0, 0),
-        (0, -1, 0), (0, 1, 0),
-        (0, 0, -1), (0, 0, 1),
-        ]
     
     DECAY_DISTANCE_LIMIT = 5
     
@@ -410,34 +522,9 @@ def decay_leaves(level, decayList):
             checkNeighbors = True
         
         elif blockID == leafID:
-            turnToAir.append(relY)
             checkNeighbors = True
         
-        elif blockID == snowLayerID:
-            # Make this snow layer fall to a block below.
-            snowY = relY
-            while chunk.Blocks[relX, relZ, snowY - 1] == airID:
-                snowY -= 1
-            
-            # If the snow layer has fallen, turn its former location to air and
-            # its new location to snow.
-            if snowY != y:
-                turnToAir.append(relY)
-                chunk.Blocks[relX, relZ, snowY] = snowLayerID
-                chunk.chunkChanged()
-        
-        elif blockID == vinesID:
-            # Destroy this vine block and any vines beneath it.
-            vineY = relY
-            while chunk.Blocks[relX, relZ, vineY] == vinesID:
-                turnToAir.append(vineY)
-                vineY -= 1
-        
-        if turnToAir:
-            for airY in turnToAir:
-                chunk.Blocks[relX, relZ, airY] = airID
-                chunk.Data  [relX, relZ, airY] = 0
-            chunk.chunkChanged()
+        remove_leaf_block(chunk, relX, relZ, relY)
         
         if checkNeighbors:
             for nPos in neighborPositions:
