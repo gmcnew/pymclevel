@@ -56,14 +56,12 @@ class ErosionTask:
 
         while frontier:
             fPos = frontier.pop()
-            sys.stdout.write("\rfPos %s, frontier size: %d..." % (fPos, len(frontier)))
             (fx, fz, fy) = fPos
             chunk = level.getChunk(fx / 16, fz / 16)
             blockID = chunk.Blocks[fx % 16, fz % 16, fy]
             if blockID == leafID:
                 for nPos in neighborPositions:
                     (nx, nz, ny) = map(operator.add, (fx, fz, fy), nPos)
-                    #print("adding %s to %s yields %s" % ((fx, fz, fy), nPos, (nx, nz, ny)))
                     if (nx, nz, ny) not in visited:
                         visited.add((nx, nz, ny))
                         frontier.append((nx, nz, ny))
@@ -71,11 +69,7 @@ class ErosionTask:
                 trunkFound = True
         
         if not trunkFound:
-            first = True
             for (vx, vz, vy) in visited:
-                if first:
-                    print("no trunk found, removing blocks from %d,%d,%d" % (vx, vz, vy))
-                    first = False
                 # Some of these visited blocks aren't leaf blocks, but
                 # that's okay, because removeLeafBlock() will ignore
                 # them.
@@ -501,8 +495,8 @@ def decay_leaves(level, decayList):
     maxSize = 0
     while not decayQueue.empty():
         maxSize = max(decayQueue.qsize(), maxSize)
-        sys.stdout.write("\r  decay queue size: %8d (max: %8d)" % (decayQueue.qsize(), maxSize))
         (distance, x, z, y) = decayQueue.get()
+        sys.stdout.write("\r  decay queue size: %d (max: %d)%s" % (decayQueue.qsize(), maxSize, " " * 20))
         
         #if distance > DECAY_DISTANCE_LIMIT:
         #    continue
