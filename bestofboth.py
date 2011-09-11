@@ -393,7 +393,7 @@ logID       = materials.materials.Wood.ID
 sandID      = materials.materials.Sand.ID
 saplingID   = materials.materials.Sapling.ID
 snowLayerID = materials.materials.SnowLayer.ID
-vinesID      = 106
+vinesID     = 106
 waterID     = materials.materials.WaterStill.ID
 
 # Map log IDs to the corresponding sapling types. This is used when replanting
