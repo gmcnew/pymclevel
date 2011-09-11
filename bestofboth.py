@@ -56,6 +56,7 @@ class ErosionTask:
 
         while frontier:
             fPos = frontier.pop()
+            #print("fPos: %d,%d,%d; frontier size: %d" % (x, z, y, len(frontier)))
             (fx, fz, fy) = fPos
             chunk = level.getChunk(fx / 16, fz / 16)
             blockID = chunk.Blocks[fx % 16, fz % 16, fy]
@@ -67,6 +68,7 @@ class ErosionTask:
                         frontier.append((nx, nz, ny))
             elif blockID == logID:
                 trunkFound = True
+                break
         
         if not trunkFound:
             for (vx, vz, vy) in visited:
@@ -490,6 +492,8 @@ def decay_leaves(level, decayList):
         #print("%s %d,%d,%d" % (chunk, x, y, z))
         decayQueue.put((0, x, z, y))
     
+    # Leaves can be up to 4 blocks from a trunk, and vines (which we also care
+    # about) can be 1 block further.
     DECAY_DISTANCE_LIMIT = 5
     
     maxSize = 0
@@ -498,8 +502,8 @@ def decay_leaves(level, decayList):
         (distance, x, z, y) = decayQueue.get()
         sys.stdout.write("\r  decay queue size: %d (max: %d)%s" % (decayQueue.qsize(), maxSize, " " * 20))
         
-        #if distance > DECAY_DISTANCE_LIMIT:
-        #    continue
+        if distance > DECAY_DISTANCE_LIMIT:
+            continue
         
         (relX, relZ, relY) = (x % 16, z % 16, y)
         chunk = level.getChunk(x / 16, z / 16)
