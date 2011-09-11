@@ -83,7 +83,7 @@ class ErosionTask:
                 # that's okay, because removeLeafBlock() will ignore
                 # them.
                 chunk = level.getChunk(vx / 16, vz / 16)
-                remove_leaf_block(chunk, vx % 16, vz % 16, vy)
+                remove_tree_block(chunk, vx % 16, vz % 16, vy)
     
     # Searches a column of a chunk for leaves. If leaves are found that are not
     # connected to a tree trunk, they will be turned into air.
@@ -144,7 +144,7 @@ class ErosionTask:
     #           0 meaning the point is in the middle of the river
     # waterWidth: the width of the river, relative to the width of the erosion
     #           area
-    def erode(self, chunk, decayList, x, z, relativeDistance, waterWidth, deepestWaterDepth):
+    def erode(self, chunk, treeDecayList, x, z, relativeDistance, waterWidth, deepestWaterDepth):
         #print("setting (%d,%d) to h=%d" % (x, z, h))
         
         if deepestWaterDepth < WATER_HEIGHT and abs(relativeDistance) < waterWidth:
@@ -210,7 +210,7 @@ class ErosionTask:
             
             for logHeight in range(airHeight, MAX_HEIGHT):
                 if chunk.Blocks[x, z, logHeight] == logID:
-                    decayList.append((chunk, x, z, logHeight))
+                    treeDecayList.append((chunk, x, z, logHeight))
             
             surfaceHeight = 127
             
@@ -234,17 +234,16 @@ class ErosionTask:
                         chunkChanged = True
                         erodeDest -= 2
                 
-                # During erosion, skip leaves and air and logs.
-                elif block not in leafAndAirIDs \
-                        and not block == logID:
+                # During erosion, skip air, leaves, and logs.
+                elif block not in [airID, leafID, logID]:
                     chunk.Blocks[x, z, erodeDest] = block
                     chunkChanged = True
                     erodeDest -= 1
                 surfaceHeight -= 1
             
-            # Turn everything in this vertical column into air, but
-            # leave leaves alone (to avoid weird-looking half-trees). Leaves
-            # will be decayed elsewhere.
+            # Turn everything in this vertical column into air, but leave
+            # trees alone (to avoid weird-looking half-trees). Trees will be
+            # decayed elsewhere.
             for ah in range(airHeight, 128):
                 if chunk.Blocks[x, z, ah] not in [leafID, logID]:
                     chunk.Blocks[x, z, ah] = airID
@@ -253,8 +252,7 @@ class ErosionTask:
                 if h <= WATER_HEIGHT:
                     chunk.Blocks[x, z, h : WATER_HEIGHT + 1] = waterID
                 # Turn non-water, non-ice blocks along the shoreline, or under the water, into sand.
-                if chunk.Blocks[x, z, h - 1] != waterID \
-                        and chunk.Blocks[x, z, h - 1] != iceID:
+                if chunk.Blocks[x, z, h - 1] not in [iceID, waterID]:
                     chunk.Blocks[x, z, h - 1] = sandID
             
             if blockWasIce:
@@ -454,9 +452,10 @@ def find_edges(worldDir, edgeFilename):
     edgeFile.close()
     print("found %d edge(s)" % (numEdgeChunks))
 
-# Remove this leaf block (and collapse the snow above it). Also works for vines:
-# if this is a vine block, it and any vines directly beneath it will be removed.
-def remove_leaf_block(chunk, relX, relZ, relY, distance = 0):
+# Remove this leaf or log block (and collapse the snow above it). Also works for
+# vines: if this is a vine block, it and any vines directly beneath it will be
+# removed.
+def remove_tree_block(chunk, relX, relZ, relY, distance = 1):
     blockID = chunk.Blocks[relX, relZ, relY]
     
     turnToAir = []
@@ -490,12 +489,14 @@ def remove_leaf_block(chunk, relX, relZ, relY, distance = 0):
             vineY -= 1
         chunk.chunkChanged()
     
-    elif blockID == logID:
-        chunk.Blocks[relX, relZ, relY] = airID
+    # Some logs might be found at nonzero distances. This means they were't part
+    # of the tree being eroded, so we shouldn't remove them.
+    elif blockID == logID and distance == 0:
+        chunk.Blocks[relX, relZ, relY] = airID #materials.materials.LavaStill.ID
         chunk.Data  [relX, relZ, relY] = 0
         chunk.chunkChanged()
 
-def decay_leaves(level, decayList):
+def decay_trees(level, decayList):
     # decayList is a list of locations of logs which have been removed.
     # Leaves further than 4 blocks from one of these removed logs should be
     # decayed.
@@ -579,7 +580,7 @@ def decay_leaves(level, decayList):
         elif blockID == leafID:
             neighborPositions = ORTHOGONAL_NEIGHBOR_POSITIONS
         
-        remove_leaf_block(chunk, relX, relZ, relY, distance)
+        remove_tree_block(chunk, relX, relZ, relY, distance)
         
         for nPos in neighborPositions:
             (nx, nz, ny) = map(operator.add, (x, z, y), nPos)
@@ -613,7 +614,7 @@ def smooth(worldDir, edgeFilename, width = 16):
     skipped = 0
     smoothed = 0
     
-    decayList = []
+    treeDecayList = []
     
     if erosionTasks:
         examined = 0
@@ -623,15 +624,15 @@ def smooth(worldDir, edgeFilename, width = 16):
             
             # If the task didn't run (because it requires chunks that
             # haven't been generated yet), write it back to edges.txt.
-            if erosionTask.run(level, decayList, width):
+            if erosionTask.run(level, treeDecayList, width):
                 smoothed += 1
             else:
                 skipped += 1
                 newEdgeFile.write("%s\n" % (task))
         print("")
         
-        print("decaying leaves/vines from %d eroded tree blocks..." % (len(decayList)))
-        decay_leaves(level, decayList)
+        print("decaying %d pieces of eroded trees..." % (len(treeDecayList)))
+        decay_trees(level, treeDecayList)
         
         print("saving changes...")
         level.saveInPlace()
