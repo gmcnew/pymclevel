@@ -520,11 +520,13 @@ def decay_trees(level, decayList):
         (distance, x, z, y) = logQueue.get()
         sys.stdout.write("\r  log queue size: %d (max: %d)%s" % (logQueue.qsize(), maxSize, " " * 20))
         treeLogQueue = Queue.PriorityQueue()
-        treeLogQueue.put((x, z, y, False))
+        treeLogQueue.put((x, z, y, False, x, z, y))
         treeLogs = set()
-        groundFound = False
-        while not (treeLogQueue.empty() or groundFound):
-            (x, z, y, fromAbove) = treeLogQueue.get()
+        rootBlock = None
+        while not (treeLogQueue.empty() or rootBlock):
+            # (px, pz, py) are the coordinates of the "parent" block -- the one
+            # that led to the block at (x, z, y).
+            (x, z, y, lookForGround, px, pz, py) = treeLogQueue.get()
             if (x, z, y) not in treeLogs:
                 isLog = False
                 
@@ -536,19 +538,31 @@ def decay_trees(level, decayList):
                     #chunk.Blocks[relX, relZ, relY] = airID #materials.materials.LavaStill.ID
                     #chunk.Data  [relX, relZ, relY] = 0
                     #chunk.chunkChanged()
-                elif fromAbove and blockID in [dirtID, grassID]:
-                    groundFound = True
+                elif lookForGround and blockID in [dirtID, grassID]:
+                    rootBlock = (px, pz, py)
                 
                 if isLog:
                     treeLogs.add((x, z, y))
                     for nPos in ALL_NEIGHBOR_POSITIONS:
-                        fromAbove = (nPos == (0, 0, -1))
+                        # Check nearby blocks for dirt: below, and each of the
+                        # four blocks next to the block below.
+                        lookForGround = (nPos[2] == -1 and (nPos[0] == 0 or nPos[1] == 0))
+                        
                         (nx, nz, ny) = map(operator.add, (x, z, y), nPos)
-                        treeLogQueue.put((nx, nz, ny, fromAbove))
-        if not groundFound:
+                        treeLogQueue.put((nx, nz, ny, lookForGround, x, z, y))
+        if not rootBlock:
             logs |= treeLogs
-        #else:
-        #    print("found the ground!")
+        else:
+            # print("found the ground!")
+            # (px, pz, py) are the coordinates of the tree's lowest trunk block.
+            # Make sure there are no air blocks beneath it.
+            chunk = level.getChunk(px / 16, pz / 16)
+            (relX, relZ, relY) = (px % 16, pz % 16, py)
+            airY = relY - 1
+            while chunk.Blocks[relX, relZ, airY] in [airID, grassID, saplingID]:
+                chunk.Blocks[relX, relZ, airY] = dirtID
+                chunk.Data  [relX, relZ, airY] = 0
+                airY -= 1
     
     decayQueue = Queue.PriorityQueue()
     for (x, z, y) in logs:
